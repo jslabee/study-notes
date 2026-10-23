@@ -1,10 +1,46 @@
 import express from 'express';
+import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getDb } from './db.js';
+import { enqueue, restoreJobs } from './jobs.js';
+import { convertToText } from './materials/convert.js';
+import {
+  createMaterial,
+  deleteMaterial,
+  getMaterial,
+  listMaterials,
+} from './materials/store.js';
 
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(serverDir, '..', 'client', 'dist');
+
+const MAX_SIZE = 5 * 1024 * 1024;
+const FILE_TYPES = { '.txt': 'txt', '.srt': 'srt', '.vtt': 'vtt' };
+const UNSUPPORTED_FILE_ERROR = 'Supported files are TXT, SRT and VTT.';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_SIZE, fieldSize: MAX_SIZE, files: 1 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (FILE_TYPES[ext]) cb(null, true);
+    else cb(httpError(400, UNSUPPORTED_FILE_ERROR));
+  },
+});
+
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function parseId(value, name) {
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw httpError(400, `Invalid ${name}.`);
+  return id;
+}
 
 export const app = express();
 
@@ -12,6 +48,76 @@ app.use(express.json());
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/api/courses', (req, res) => {
+  const courses = getDb()
+    .prepare(
+      `SELECT c.id, c.name,
+              (SELECT count(*) FROM materials m WHERE m.course_id = c.id) AS materialCount
+       FROM courses c ORDER BY c.name`
+    )
+    .all();
+  res.json(courses);
+});
+
+app.post('/api/courses', (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  if (!name) throw httpError(400, 'Course name is required.');
+
+  const db = getDb();
+  if (db.prepare('SELECT 1 FROM courses WHERE name = ?').get(name)) {
+    throw httpError(409, 'A course with this name already exists.');
+  }
+  const result = db.prepare('INSERT INTO courses (name) VALUES (?)').run(name);
+  res.status(201).json({ id: Number(result.lastInsertRowid), name, materialCount: 0 });
+});
+
+app.get('/api/materials', (req, res) => {
+  const courseId =
+    req.query.courseId === undefined ? undefined : parseId(req.query.courseId, 'course id');
+  res.json(listMaterials(courseId));
+});
+
+app.post('/api/materials', upload.single('file'), (req, res) => {
+  const courseId = parseId(req.body?.courseId, 'course id');
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  const text = req.body?.text;
+  const file = req.file;
+
+  if (!getDb().prepare('SELECT 1 FROM courses WHERE id = ?').get(courseId)) {
+    throw httpError(404, 'Course not found.');
+  }
+  if (!title) throw httpError(400, 'Title is required.');
+  if (file && text !== undefined) throw httpError(400, 'Provide either text or a file, not both.');
+  if (!file && text === undefined) throw httpError(400, 'Provide text or a file.');
+
+  const type = file ? FILE_TYPES[path.extname(file.originalname).toLowerCase()] : 'text';
+  const raw = file ? file.buffer.toString('utf8') : String(text);
+
+  let content;
+  try {
+    content = convertToText(raw, type);
+  } catch (err) {
+    throw httpError(400, err.message);
+  }
+
+  const id = createMaterial({ courseId, title, type, content });
+  enqueue('index', id);
+  res.status(202).json({ id, status: 'processing' });
+});
+
+app.get('/api/materials/:id', (req, res) => {
+  const material = getMaterial(parseId(req.params.id, 'material id'));
+  if (!material) throw httpError(404, 'Material not found.');
+  res.json(material);
+});
+
+app.delete('/api/materials/:id', (req, res) => {
+  if (!deleteMaterial(parseId(req.params.id, 'material id'))) {
+    throw httpError(404, 'Material not found.');
+  }
+  res.json({ deleted: true });
 });
 
 // Unknown API routes get a JSON 404 instead of the client app
@@ -29,6 +135,14 @@ if (fs.existsSync(clientDist)) {
 
 // Unified error handling: always respond with { error } and a matching HTTP status
 app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FIELD_VALUE') {
+      err.status = 413;
+      err.message = 'The file or text is larger than 5 MB.';
+    } else {
+      err.status = 400;
+    }
+  }
   const status = err.status || err.statusCode || 500;
   if (status >= 500) console.error(err);
   res.status(status).json({
@@ -37,6 +151,8 @@ app.use((err, req, res, next) => {
 });
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  getDb();
+  restoreJobs();
   const port = process.env.PORT;
   app.listen(port, () => {
     console.log(`Server listening on port ${port}`);
