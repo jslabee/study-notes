@@ -197,6 +197,31 @@ th {
   padding-left: 24px;
 }
 
+.answer h2 {
+  margin-top: 16px;
+}
+
+.sources {
+  padding-left: 24px;
+}
+
+.sources li {
+  margin-bottom: 8px;
+}
+
+.sources .meta {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.excerpt {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  background: var(--surface);
+  white-space: pre-wrap;
+}
+
 .error {
   color: var(--danger);
 }

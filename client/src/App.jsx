@@ -9,6 +9,7 @@ function App() {
   const [serverOnline, setServerOnline] = useState(null)
   const [courseId, setCourseId] = useState(null)
   const [materialId, setMaterialId] = useState(null)
+  const [returnView, setReturnView] = useState('materials')
 
   useEffect(() => {
     getHealth()
@@ -16,8 +17,10 @@ function App() {
       .catch(() => setServerOnline(false))
   }, [])
 
-  function openMaterial(id) {
+  // The Material view's back button returns to the view the material was opened from
+  function openMaterial(id, from) {
     setMaterialId(id)
+    setReturnView(from)
     setView('material')
   }
 
@@ -54,13 +57,16 @@ function App() {
           <Materials
             selectedCourseId={courseId}
             onCourseChange={setCourseId}
-            onOpen={openMaterial}
+            onOpen={(id) => openMaterial(id, 'materials')}
           />
         )}
         {view === 'material' && (
-          <Material key={materialId} id={materialId} onBack={() => setView('materials')} />
+          <Material key={materialId} id={materialId} onBack={() => setView(returnView)} />
         )}
-        {view === 'ask' && <Ask />}
+        {/* Ask stays mounted so the answer is kept while a source material is open */}
+        <div hidden={view !== 'ask'}>
+          <Ask active={view === 'ask'} onOpenMaterial={(id) => openMaterial(id, 'ask')} />
+        </div>
       </main>
     </>
   )

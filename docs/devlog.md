@@ -214,3 +214,49 @@
 **Git:** branch feature/scaffold, changed files: 11
 
 **My changes and outcome:** 
+
+### 23/10/2026, 21:56:37
+
+**Prompt:**
+
+> <pasted_content id="a2c1">
+> Implement questions about the study material according to `docs/spec.md`, subsection **"RAG Search"**, and the `POST /api/ask` route in the API section.
+> 
+> 1. **`server/rag/search.js`**
+>    - Generate an embedding for the question using the same embedding function used for material chunks.
+>    - Search `chunk_vectors` for the 6 most similar chunks, using only materials whose status is `ready`.
+>    - If `courseId` is provided, retrieve the 30 most similar chunks first, then keep the top 6 belonging to that course.
+>    - Return the matching chunks with their material titles.
+> 
+> 2. **`server/rag/answer.js`**
+>    - Build a message containing numbered excerpts and use the exact system instruction for answering from the specification.
+>    - Call the OpenAI API and return `{ answer, sources }`.
+> 
+> 3. **API**
+>    - Implement `POST /api/ask` exactly as specified in the API section of `docs/spec.md`.
+> 
+> 4. **Ask view**
+>    - Add a question input field.
+>    - Add a course selector, defaulting to **"All courses"**.
+>    - Add an **"Ask"** button.
+>    - While processing, display **"Searching..."**.
+>    - Display the answer followed by a numbered list of sources, each showing the material title.
+>    - Clicking a source expands its excerpt text.
+>    - Add a link beside each source that opens the corresponding material.
+> 
+> All UI text must be in English.
+> 
+> Follow `CLAUDE.md` and existing project conventions. Read `docs/spec.md` carefully and follow its exact instructions and API contract. Do not invent or paraphrase the required system prompt. Do not modify unrelated functionality.
+> 
+> Add appropriate tests for search filtering, course filtering, answer generation, and the API route. Mock Ollama and OpenAI calls in tests so that tests run locally without making real API calls or consuming API tokens.
+> 
+> Run `npm test` and the client build when finished. Report changed files, test results, build result, and any decisions or ambiguities. Do not commit or push changes.
+> </pasted_content id="a2c1">
+
+**Summary:** Built Step 6 question answering: search with Ready and course filtering in server/rag/search.js, answers with the exact spec prompt in server/rag/answer.js, POST /api/ask in server/index.js, and the Ask view in Ask.jsx, api.js, App.jsx and index.css, with tests that fake Ollama and OpenAI; npm test passed 74 of 74 and the client build succeeded.
+
+**Type:** implementation
+
+**Git:** branch feature/scaffold, changed files: 12
+
+**My changes and outcome:** 

@@ -55,7 +55,7 @@ function Material({ id, onBack }) {
   if (error) {
     return (
       <section>
-        <button onClick={onBack}>Back to materials</button>
+        <button onClick={onBack}>Back</button>
         <p className="error">{error}</p>
       </section>
     )
@@ -67,7 +67,7 @@ function Material({ id, onBack }) {
 
   return (
     <section>
-      <button onClick={onBack}>Back to materials</button>
+      <button onClick={onBack}>Back</button>
       <h1>{material.title}</h1>
       <p className="meta">
         {material.type.toUpperCase()} · {material.chars.toLocaleString('en-US')} characters ·{' '}

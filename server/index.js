@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
 import { enqueue, restoreJobs } from './jobs.js';
+import { EMBEDDING_UNREACHABLE_ERROR } from './llm.js';
+import { answerQuestion } from './rag/answer.js';
 import { convertToText } from './materials/convert.js';
 import {
   createMaterial,
@@ -33,6 +35,7 @@ const upload = multer({
 function httpError(status, message) {
   const err = new Error(message);
   err.status = status;
+  err.expose = true;
   return err;
 }
 
@@ -152,6 +155,28 @@ app.delete('/api/materials/:id', (req, res) => {
   res.json({ deleted: true });
 });
 
+app.post('/api/ask', async (req, res) => {
+  const question = typeof req.body?.question === 'string' ? req.body.question.trim() : '';
+  if (!question) throw httpError(400, 'Question is required.');
+
+  const rawCourseId = req.body?.courseId;
+  let courseId;
+  if (rawCourseId !== undefined && rawCourseId !== null && rawCourseId !== '') {
+    courseId = parseId(rawCourseId, 'course id');
+    if (!getDb().prepare('SELECT 1 FROM courses WHERE id = ?').get(courseId)) {
+      throw httpError(404, 'Course not found.');
+    }
+  }
+
+  try {
+    res.json(await answerQuestion(question, { courseId }));
+  } catch (err) {
+    // Failures of Ollama or OpenAI are reported with their readable message
+    console.error(err);
+    throw httpError(err.message === EMBEDDING_UNREACHABLE_ERROR ? 503 : 502, err.message);
+  }
+});
+
 // Unknown API routes get a JSON 404 instead of the client app
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Not found' });
@@ -176,9 +201,9 @@ app.use((err, req, res, next) => {
     }
   }
   const status = err.status || err.statusCode || 500;
-  if (status >= 500) console.error(err);
+  if (status >= 500 && !err.expose) console.error(err);
   res.status(status).json({
-    error: status < 500 && err.message ? err.message : 'Internal server error',
+    error: (status < 500 || err.expose) && err.message ? err.message : 'Internal server error',
   });
 });
 

@@ -70,3 +70,8 @@ export async function getNotes(materialId) {
 export function generateNotes(materialId) {
   return request(`/api/materials/${materialId}/notes`, { method: 'POST' })
 }
+
+// courseId null means all courses
+export function ask(question, courseId) {
+  return postJson('/api/ask', courseId === null ? { question } : { question, courseId })
+}
