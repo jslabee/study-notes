@@ -332,3 +332,33 @@
 **Git:** branch feature/scaffold, changed files: 7
 
 **My changes and outcome:** 
+
+### 23/10/2026, 22:59:54
+
+**Prompt:**
+
+> <pasted_content id="a2c1">
+> Fix the false "no material with this title exists" messages in `eval/run.js`.
+> 
+> The evaluation currently reports:
+> - Expected `Cell biology`, found `2. Cell biology`, but says the material does not exist.
+> - Expected `Roman Republic`, found `3. Roman Republic`, but says the material does not exist.
+> 
+> Inspect the existing database title format and evaluation code. Make the smallest targeted fix so existence checks and hit comparisons consistently use the actual stored material titles. If titles contain a leading numbering prefix, normalize that prefix consistently for comparison without changing the stored titles or search behavior.
+> 
+> Add or update tests for numbered and unnumbered titles. Run `npm test`, `npm run build`, and `npm run eval` if safe. Do not modify search ranking, add features, install dependencies, or commit/push changes.
+> </pasted_content id="a2c1">
+
+**Summary:** Fixed false MISS results and "no material with this title exists" messages in the search evaluation: eval/titles.js now ignores leading numbering and case when comparing titles, eval/run.js uses it for both checks, and tests/eval-titles.test.js and one README sentence were added or updated; npm test passed 77 of 77, the build succeeded and npm run eval scored 3/3.
+
+**Type:** bugfix
+
+**Git:** branch feature/scaffold, changed files: 5
+
+**My changes and outcome:** 
+
+### 23/10/2026, 23:01:49
+
+**Prompt:**
+
+> git add .

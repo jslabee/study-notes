@@ -4,11 +4,10 @@
 import fs from 'node:fs';
 import { closeDb, getDb } from '../server/db.js';
 import { searchChunks } from '../server/rag/search.js';
+import { sameTitle } from './titles.js';
 
 const QUESTIONS_FILE = new URL('./questions.json', import.meta.url);
 const REQUIRED_ENV = ['DB_PATH', 'OLLAMA_URL', 'EMBED_MODEL', 'EMBED_DIM'];
-
-const sameTitle = (a, b) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 class EvalError extends Error {}
 

@@ -134,7 +134,7 @@ npm run eval
 
 Checks how well search finds the right material. For each entry in `eval/questions.json` the script runs only the search (no answer model, no OpenAI calls) and prints whether the expected material is among the found sources, followed by the overall hit rate.
 
-`eval/questions.json` contains three **sample** entries whose titles do not exist in your database. Replace them with real questions about your materials, using the exact material titles shown in the app (the comparison ignores case):
+`eval/questions.json` contains three **sample** entries whose titles do not exist in your database. Replace them with real questions about your materials, using the material titles shown in the app. The comparison ignores case and a leading numbering prefix, so `Cell biology` matches a material titled `2. Cell biology`:
 
 ```json
 [
