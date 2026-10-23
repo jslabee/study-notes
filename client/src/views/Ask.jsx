@@ -22,10 +22,11 @@ function Ask({ active, onOpenMaterial }) {
   async function handleAsk(event) {
     event.preventDefault()
     setError('')
+    setResult(null)
+    setExpanded(new Set())
     setSearching(true)
     try {
       setResult(await ask(question.trim(), courseId))
-      setExpanded(new Set())
     } catch (err) {
       setError(err.message)
     } finally {
@@ -88,6 +89,11 @@ function Ask({ active, onOpenMaterial }) {
             <ReactMarkdown>{result.answer}</ReactMarkdown>
           </div>
 
+          {result.sources.length === 0 && (
+            <p className="meta">
+              No matching excerpts were found. Only materials with status Ready are searched.
+            </p>
+          )}
           {result.sources.length > 0 && (
             <>
               <h2>Sources</h2>

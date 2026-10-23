@@ -12,24 +12,41 @@ function Material({ id, onBack }) {
   const [showAll, setShowAll] = useState(false)
 
   const [notes, setNotes] = useState(null)
+  const [notesLoaded, setNotesLoaded] = useState(false)
   const [notesError, setNotesError] = useState('')
   const [starting, setStarting] = useState(false)
+
+  const loadMaterial = useCallback(async () => {
+    try {
+      setMaterial(await getMaterial(id))
+    } catch (err) {
+      setError(err.message)
+    }
+  }, [id])
 
   const loadNotes = useCallback(async () => {
     try {
       setNotes(await getNotes(id))
     } catch (err) {
       setNotesError(err.message)
+    } finally {
+      setNotesLoaded(true)
     }
   }, [id])
 
   // App renders this view with key={id}, so state starts fresh for each material
   useEffect(() => {
-    getMaterial(id)
-      .then(setMaterial)
-      .catch((err) => setError(err.message))
+    loadMaterial()
     loadNotes()
-  }, [id, loadNotes])
+  }, [loadMaterial, loadNotes])
+
+  // Refresh the material while it is being processed
+  const processing = material?.status === 'processing'
+  useEffect(() => {
+    if (!processing) return
+    const timer = setTimeout(loadMaterial, REFRESH_MS)
+    return () => clearTimeout(timer)
+  }, [processing, material, loadMaterial])
 
   // Refresh notes while they are being generated
   const generating = notes?.status === 'processing'
@@ -60,7 +77,7 @@ function Material({ id, onBack }) {
       </section>
     )
   }
-  if (!material) return <p>Loading...</p>
+  if (!material) return <p className="meta">Loading material...</p>
 
   const truncated = !showAll && material.content.length > PREVIEW_CHARS
   const content = truncated ? material.content.slice(0, PREVIEW_CHARS) : material.content
@@ -73,8 +90,15 @@ function Material({ id, onBack }) {
         {material.type.toUpperCase()} · {material.chars.toLocaleString('en-US')} characters ·{' '}
         <span className={`status-${material.status}`}>{STATUS_LABELS[material.status]}</span>
       </p>
-      {material.status === 'error' && material.error && (
-        <p className="error">{material.error}</p>
+      {processing && (
+        <p className="meta">
+          This material is being processed. It can be used in questions when it is ready.
+        </p>
+      )}
+      {material.status === 'error' && (
+        <p className="error">
+          {material.error || 'Processing failed.'} This material is not used in questions.
+        </p>
       )}
 
       <div className="card">
@@ -83,19 +107,27 @@ function Material({ id, onBack }) {
           {generating || starting ? (
             <span className="status-processing">Generating notes...</span>
           ) : (
-            <button onClick={handleGenerate}>
+            <button onClick={handleGenerate} disabled={!notesLoaded}>
               {notes?.status === 'ready' ? 'Regenerate' : 'Generate notes'}
             </button>
           )}
         </div>
+        {!notesLoaded && <p className="meta">Loading notes...</p>}
+        {generating && (
+          <p className="meta">This page refreshes automatically. Long materials can take several minutes.</p>
+        )}
         {notesError && <p className="error">{notesError}</p>}
-        {notes?.status === 'error' && notes.error && <p className="error">{notes.error}</p>}
+        {notes?.status === 'error' && (
+          <p className="error">Notes could not be generated: {notes.error || 'unknown error.'}</p>
+        )}
         {notes?.status === 'ready' && notes.content && (
           <div className="notes">
             <ReactMarkdown>{notes.content}</ReactMarkdown>
           </div>
         )}
-        {!notes && !generating && !starting && <p className="meta">No notes yet.</p>}
+        {notesLoaded && !notes && !starting && (
+          <p className="meta">No notes yet. Use "Generate notes" to create them.</p>
+        )}
       </div>
 
       <h2>Material</h2>

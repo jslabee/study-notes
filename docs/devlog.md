@@ -260,3 +260,75 @@
 **Git:** branch feature/scaffold, changed files: 12
 
 **My changes and outcome:** 
+
+### 23/10/2026, 22:45:01
+
+**Prompt:**
+
+> <pasted_content id="a2c1">
+> # Finalize Study Notes for Version 1.0
+> 
+> Prepare the existing application for version 1.0. Do not add any new product features beyond the three tasks below. Follow `CLAUDE.md` and `docs/spec.md`. Preserve the existing architecture and behavior.
+> 
+> ## 1. Search evaluation
+> 
+> - Create `eval/questions.json` containing three sample questions.
+> - Each entry must have this exact structure:
+>   ```json
+>   {
+>     "question": "...",
+>     "expectedMaterial": "material title"
+>   }
+>   ```
+> - Use material titles that can be replaced with actual titles from the user's materials. Clearly document this in the evaluation output or README.
+> - Create `eval/run.js` and add an `npm run eval` script to `package.json`.
+> - For each question, call the existing retrieval/search functionality only. Do not call the answer-generation model or OpenAI.
+> - Report each question, the expected material title, whether that material appears among the retrieved sources, and the overall hit rate at the end.
+> - Reuse existing search code. Do not duplicate retrieval logic or change search behavior.
+> - Handle missing configuration, database errors, and an empty question list with clear messages.
+> 
+> ## 2. Review all existing views
+> 
+> Inspect every existing client view and improve only the handling and presentation of existing states.
+> 
+> - Ensure loading and processing states are visible and understandable.
+> - Ensure errors are displayed clearly.
+> - Ensure empty states have helpful messages, such as "No materials yet."
+> - Disable relevant buttons while their operation is in progress to prevent duplicate submissions.
+> - Ensure users can understand when no search results or notes are available.
+> - Preserve the existing design and functionality. Do not introduce new features.
+> - Avoid unrelated refactoring.
+> 
+> ## 3. README.md
+> 
+> Write an English `README.md` covering:
+> - Project overview and existing functionality.
+> - Prerequisites.
+> - Installation.
+> - Environment variables, based on `.env.example`.
+> - How to configure and run Ollama and the embedding model.
+> - Development and production commands.
+> - How to use the application.
+> - How to run tests and search evaluation.
+> - Any limitations or setup requirements relevant to a new developer.
+> 
+> ## Verification
+> 
+> - Run `npm test` and `npm run build`.
+> - Run `npm run eval` only if it can be done safely with the current database and configuration. Do not modify or delete user data.
+> - Do not make real OpenAI API calls during tests or evaluation.
+> - Do not install new dependencies without approval.
+> - Do not modify `docs/spec.md`, `docs/devlog.md`, or `.claude/`.
+> - Do not commit or push changes.
+> - Report changed files, test/build results, and any steps requiring manual verification.
+> 
+> Implement these tasks directly in the existing project. Do not start additional work beyond this scope.
+> </pasted_content id="a2c1">
+
+**Summary:** Finished Step 7: a search evaluation (eval/questions.json, eval/run.js and an npm run eval script), clearer loading, empty, error and in-progress states in Materials.jsx, Material.jsx and Ask.jsx, and an English README.md; npm test passed 74 of 74, the build succeeded and npm run eval ran on the local database with a 0/3 hit rate because the sample titles are placeholders.
+
+**Type:** implementation
+
+**Git:** branch feature/scaffold, changed files: 7
+
+**My changes and outcome:** 

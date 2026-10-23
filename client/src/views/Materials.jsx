@@ -13,8 +13,12 @@ const STATUS_LABELS = { processing: 'Processing', ready: 'Ready', error: 'Error'
 
 function Materials({ selectedCourseId, onCourseChange, onOpen }) {
   const [courses, setCourses] = useState([])
+  const [coursesLoaded, setCoursesLoaded] = useState(false)
   const [materials, setMaterials] = useState([])
+  const [loadedCourseId, setLoadedCourseId] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
 
   const [newCourseOpen, setNewCourseOpen] = useState(false)
   const [newCourseName, setNewCourseName] = useState('')
@@ -35,6 +39,7 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
     if (courseId === null) return
     try {
       setMaterials(await getMaterials(courseId))
+      setLoadedCourseId(courseId)
     } catch (err) {
       setError(err.message)
     }
@@ -44,6 +49,7 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
     getCourses()
       .then(setCourses)
       .catch((err) => setError(err.message))
+      .finally(() => setCoursesLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -78,6 +84,7 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
   async function handleUpload(event) {
     event.preventDefault()
     setFormError('')
+    setNotice('')
     if (source === 'file') {
       if (!file) return setFormError('Choose a file to upload.')
       if (file.size > MAX_SIZE) return setFormError('The file is larger than 5 MB.')
@@ -93,6 +100,7 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
         text: source === 'text' ? text : undefined,
         file: source === 'file' ? file : undefined,
       })
+      setNotice(`"${title.trim()}" was added and is being processed.`)
       setTitle('')
       setText('')
       setFile(null)
@@ -109,14 +117,21 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
   async function handleDelete(material) {
     if (!window.confirm(`Delete "${material.title}"? This cannot be undone.`)) return
     setError('')
+    setNotice('')
+    setDeletingId(material.id)
     try {
       await deleteMaterial(material.id)
       await loadMaterials()
       setCourses(await getCourses())
     } catch (err) {
       setError(err.message)
+    } finally {
+      setDeletingId(null)
     }
   }
+
+  const materialsLoading = courseId !== null && loadedCourseId !== courseId
+  const anyError = materials.some((m) => m.status === 'error')
 
   return (
     <section>
@@ -132,7 +147,9 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
             onChange={(e) => onCourseChange(Number(e.target.value))}
             disabled={courses.length === 0}
           >
-            {courses.length === 0 && <option value="">No courses yet</option>}
+            {courses.length === 0 && (
+              <option value="">{coursesLoaded ? 'No courses yet' : 'Loading courses...'}</option>
+            )}
             {courses.map((course) => (
               <option key={course.id} value={course.id}>
                 {course.name} ({course.materialCount})
@@ -214,9 +231,27 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
         </form>
       )}
 
+      {coursesLoaded && courses.length === 0 && !newCourseOpen && (
+        <p className="meta">No courses yet. Create a course with "New course" to add materials.</p>
+      )}
+
+      {notice && <p className="status-ready">{notice}</p>}
+
+      {materialsLoading && <p className="meta">Loading materials...</p>}
+
+      {anyProcessing && (
+        <p className="meta">
+          Some materials are being processed. This list refreshes automatically.
+        </p>
+      )}
+      {anyError && (
+        <p className="meta">Open a material with status Error to see what went wrong.</p>
+      )}
+
       {courseId !== null &&
+        !materialsLoading &&
         (materials.length === 0 ? (
-          <p>No materials in this course yet.</p>
+          <p className="meta">No materials yet. Add one with the form above.</p>
         ) : (
           <table>
             <thead>
@@ -240,7 +275,12 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
                   <td>{material.chars.toLocaleString('en-US')}</td>
                   <td className={`status-${material.status}`}>{STATUS_LABELS[material.status]}</td>
                   <td>
-                    <button onClick={() => handleDelete(material)}>Delete</button>
+                    <button
+                      onClick={() => handleDelete(material)}
+                      disabled={deletingId !== null}
+                    >
+                      {deletingId === material.id ? 'Deleting...' : 'Delete'}
+                    </button>
                   </td>
                 </tr>
               ))}

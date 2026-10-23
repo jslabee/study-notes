@@ -1,0 +1,14 @@
+[
+  {
+    "question": "What do plants need for photosynthesis?",
+    "expectedMaterial": "Photosynthesis"
+  },
+  {
+    "question": "What is the role of mitochondria in a cell?",
+    "expectedMaterial": "Cell biology"
+  },
+  {
+    "question": "How was the Roman Republic governed?",
+    "expectedMaterial": "Roman Republic"
+  }
+]

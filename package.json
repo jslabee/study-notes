@@ -8,7 +8,8 @@
     "dev": "concurrently \"node --watch --env-file=.env server/index.js\" \"npm --prefix client run dev\"",
     "build": "npm --prefix client run build",
     "start": "node --env-file=.env server/index.js",
-    "reindex": "node --env-file=.env server/rag/reindex.js"
+    "reindex": "node --env-file=.env server/rag/reindex.js",
+    "eval": "node --env-file=.env eval/run.js"
   },
   "keywords": [],
   "author": "",
