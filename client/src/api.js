@@ -7,7 +7,11 @@ async function request(url, options) {
     throw new Error('Could not reach the server.')
   }
   const data = await res.json().catch(() => null)
-  if (!res.ok) throw new Error(data?.error || `Request failed with status ${res.status}.`)
+  if (!res.ok) {
+    const err = new Error(data?.error || `Request failed with status ${res.status}.`)
+    err.status = res.status
+    throw err
+  }
   return data
 }
 
@@ -51,4 +55,18 @@ export function uploadMaterial({ courseId, title, text, file }) {
 
 export function deleteMaterial(id) {
   return request(`/api/materials/${id}`, { method: 'DELETE' })
+}
+
+// Returns null when the material has no notes yet
+export async function getNotes(materialId) {
+  try {
+    return await request(`/api/materials/${materialId}/notes`)
+  } catch (err) {
+    if (err.status === 404) return null
+    throw err
+  }
+}
+
+export function generateNotes(materialId) {
+  return request(`/api/materials/${materialId}/notes`, { method: 'POST' })
 }

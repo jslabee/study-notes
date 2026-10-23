@@ -118,3 +118,46 @@
 **Git:** branch feature/scaffold, changed files: 6
 
 **My changes and outcome:** 
+
+### 23/10/2026, 18:59:50
+
+**Prompt:**
+
+> <pasted_content id="a2c1">
+> Implement notes generation according to `docs/spec.md`, section **"Model Instructions and Search Settings"**, subsection **"Notes"**.
+> 
+> 1. **`server/llm.js`**: Implement a function to call the OpenAI API using the `openai` package and the model specified by `OPENAI_MODEL`. Retry up to three times on transient errors and provide a clear, understandable error if the API key is missing or the request fails.
+> 
+> 2. **`server/notes/`**: Implement notes generation using the exact instructions from the specification.
+>    - For text longer than 60,000 characters, split it into chunks at paragraph or sentence boundaries.
+>    - Generate notes for each chunk and merge the results.
+>    - If there are more than 10 chunks, merge them in groups of 10.
+>    - Run notes generation as a `"notes"` job in `server/jobs.js` and update `notes.status` accordingly.
+> 
+> 3. **API routes**: Implement `GET` and `POST /api/materials/:id/notes` as specified in the API section of `docs/spec.md`.
+> 
+> 4. **Tests**:
+>    - Test splitting long text into chunks.
+>    - Test merging chunks in groups of 10.
+>    - Do not make real API calls in tests; replace `llm.js` with a mock function.
+> 
+> 5. **Material view**:
+>    - Add a **"Generate notes"** button, or **"Regenerate"** if notes already exist.
+>    - While generation is in progress, display **"Generating notes..."** and refresh the status every 3 seconds.
+>    - Display the generated notes above the source material text, using `react-markdown`.
+>    - If generation fails, display the error message from the `error` field.
+> 
+> All UI text must be in English.
+> 
+> Follow `CLAUDE.md` and the existing project conventions. Inspect `docs/spec.md` carefully and use its exact notes-generation instructions rather than inventing or paraphrasing them. Do not implement search functionality yet.
+> 
+> Run `npm test` and the build when finished. Report the changed files, test results, build result, and any decisions or ambiguities. Do not commit or push changes.
+> </pasted_content id="a2c1">
+
+**Summary:** Built Step 4 notes generation: server/llm.js (OpenAI call with 3 retries and readable errors), server/notes/generate.js (exact spec prompts, 60,000-character splitting, merging in groups of 10), a notes job in server/jobs.js, notes routes in server/index.js, and the Material view UI in Material.jsx, api.js and index.css; npm test passed 40 of 40 and the client build succeeded.
+
+**Type:** implementation
+
+**Git:** branch feature/scaffold, changed files: 10
+
+**My changes and outcome:** 

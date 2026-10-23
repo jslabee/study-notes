@@ -113,6 +113,38 @@ app.get('/api/materials/:id', (req, res) => {
   res.json(material);
 });
 
+app.get('/api/materials/:id/notes', (req, res) => {
+  const notes = getDb()
+    .prepare(
+      `SELECT status, content, model, error, created_at AS createdAt
+       FROM notes WHERE material_id = ?`
+    )
+    .get(parseId(req.params.id, 'material id'));
+  if (!notes) throw httpError(404, 'Notes not found.');
+  res.json(notes);
+});
+
+app.post('/api/materials/:id/notes', (req, res) => {
+  const materialId = parseId(req.params.id, 'material id');
+  const db = getDb();
+  if (!db.prepare('SELECT 1 FROM materials WHERE id = ?').get(materialId)) {
+    throw httpError(404, 'Material not found.');
+  }
+
+  // A request while notes are already being generated does not start a second job
+  const existing = db.prepare('SELECT status FROM notes WHERE material_id = ?').get(materialId);
+  if (existing?.status !== 'processing') {
+    db.prepare(
+      `INSERT INTO notes (material_id) VALUES (?)
+       ON CONFLICT (material_id) DO UPDATE SET
+         content = NULL, model = NULL, status = 'processing', error = NULL,
+         created_at = CURRENT_TIMESTAMP`
+    ).run(materialId);
+    enqueue('notes', materialId);
+  }
+  res.status(202).json({ status: 'processing' });
+});
+
 app.delete('/api/materials/:id', (req, res) => {
   if (!deleteMaterial(parseId(req.params.id, 'material id'))) {
     throw httpError(404, 'Material not found.');

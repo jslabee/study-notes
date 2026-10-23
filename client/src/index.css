@@ -175,6 +175,28 @@ th {
   margin: 16px 0;
 }
 
+.card .row {
+  width: 100%;
+  margin: 0;
+}
+
+.card .row h2 {
+  margin: 0;
+}
+
+.notes {
+  width: 100%;
+}
+
+.notes h2 {
+  font-size: 18px;
+  margin: 16px 0 8px;
+}
+
+.notes ul {
+  padding-left: 24px;
+}
+
 .error {
   color: var(--danger);
 }

@@ -1,4 +1,6 @@
 import { getDb } from './db.js';
+import { getModel } from './llm.js';
+import { generateNotes } from './notes/generate.js';
 
 const queue = [];
 let running = false;
@@ -11,12 +13,31 @@ const handlers = {
       .prepare("UPDATE materials SET status = 'ready', error = NULL WHERE id = ?")
       .run(materialId);
   },
+  notes: async (materialId) => {
+    const material = getDb()
+      .prepare('SELECT title, content FROM materials WHERE id = ?')
+      .get(materialId);
+    if (!material) return;
+
+    const model = getModel();
+    const content = await generateNotes(material);
+    getDb()
+      .prepare(
+        "UPDATE notes SET content = ?, model = ?, status = 'ready', error = NULL WHERE material_id = ?"
+      )
+      .run(content, model, materialId);
+  },
 };
 
 const failHandlers = {
   index: (materialId, message) => {
     getDb()
       .prepare("UPDATE materials SET status = 'error', error = ? WHERE id = ?")
+      .run(message, materialId);
+  },
+  notes: (materialId, message) => {
+    getDb()
+      .prepare("UPDATE notes SET status = 'error', error = ? WHERE material_id = ?")
       .run(message, materialId);
   },
 };
@@ -54,12 +75,18 @@ async function runNext() {
   }
 }
 
-// Re-queues all materials that were still processing when the server stopped
+// Re-queues all materials and notes that were still processing when the server stopped
 export function restoreJobs() {
-  const rows = getDb()
+  const db = getDb();
+  const materials = db
     .prepare("SELECT id FROM materials WHERE status = 'processing' ORDER BY id")
     .all();
-  for (const row of rows) enqueue('index', row.id);
+  for (const row of materials) enqueue('index', row.id);
+
+  const notes = db
+    .prepare("SELECT material_id AS id FROM notes WHERE status = 'processing' ORDER BY id")
+    .all();
+  for (const row of notes) enqueue('notes', row.id);
 }
 
 // Resolves when the queue is empty (used by tests)
