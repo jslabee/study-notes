@@ -1,18 +1,14 @@
 import { getDb } from './db.js';
 import { getModel } from './llm.js';
 import { generateNotes } from './notes/generate.js';
+import { indexMaterial } from './rag/index.js';
 
 const queue = [];
 let running = false;
 let idleWaiters = [];
 
 const handlers = {
-  // Real indexing is added in step 5; for now the material only becomes ready
-  index: (materialId) => {
-    getDb()
-      .prepare("UPDATE materials SET status = 'ready', error = NULL WHERE id = ?")
-      .run(materialId);
-  },
+  index: (materialId) => indexMaterial(materialId),
   notes: async (materialId) => {
     const material = getDb()
       .prepare('SELECT title, content FROM materials WHERE id = ?')

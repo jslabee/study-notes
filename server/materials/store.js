@@ -1,4 +1,5 @@
 import { getDb } from '../db.js';
+import { deleteChunks } from '../rag/index.js';
 
 const LIST_COLUMNS = `
   m.id, m.course_id AS courseId, m.title, m.type, length(m.content) AS chars,
@@ -39,14 +40,11 @@ export function createMaterial({ courseId, title, type, content }) {
   return Number(result.lastInsertRowid);
 }
 
-// chunk_vectors has no foreign keys, so vectors are deleted before chunks and the material
+// Vectors are deleted first, then chunks, then the material (notes follow by cascade)
 export function deleteMaterial(id) {
   const db = getDb();
   const remove = db.transaction(() => {
-    db.prepare(
-      'DELETE FROM chunk_vectors WHERE rowid IN (SELECT id FROM chunks WHERE material_id = ?)'
-    ).run(id);
-    db.prepare('DELETE FROM chunks WHERE material_id = ?').run(id);
+    deleteChunks(id);
     return db.prepare('DELETE FROM materials WHERE id = ?').run(id).changes > 0;
   });
   return remove();

@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { installFakeOllama } from './helpers/fake-ollama.js';
 
-// Every run uses its own temporary database
+// Every run uses its own temporary database; indexing uses fake embeddings
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'study-notes-test-'));
 process.env.DB_PATH = path.join(tmpDir, 'nested', 'test.db');
+const fakeOllama = installFakeOllama();
 
 const { app } = await import('../server/index.js');
 const { getDb, closeDb } = await import('../server/db.js');
@@ -33,6 +35,7 @@ before(async () => {
 after(() => {
   server.close();
   closeDb();
+  fakeOllama.restore();
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -71,7 +74,7 @@ test('pasted text material is created, becomes ready and is listed', async () =>
   assert.equal(material.status, 'ready');
   assert.equal(material.type, 'text');
   assert.equal(material.content, 'Cells are small.');
-  assert.equal(material.chunkCount, 0);
+  assert.equal(material.chunkCount, 1);
 
   const list = await (await fetch(`${baseUrl}/api/materials?courseId=${courseId}`)).json();
   const item = list.find((m) => m.id === id);

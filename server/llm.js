@@ -83,3 +83,63 @@ export async function complete({ system, user, maxOutputTokens }) {
   if (!response.output_text?.trim()) throw new Error('The model returned an empty response.');
   return response.output_text;
 }
+
+const EMBED_BATCH_SIZE = 32;
+export const EMBEDDING_UNREACHABLE_ERROR = 'Embedding service (Ollama) is not reachable.';
+
+function embeddingConfig() {
+  const url = process.env.OLLAMA_URL;
+  const model = process.env.EMBED_MODEL;
+  const dim = Number(process.env.EMBED_DIM);
+  if (!url) throw new Error('Ollama URL is not set. Set OLLAMA_URL in .env.');
+  if (!model) throw new Error('Embedding model is not set. Set EMBED_MODEL in .env.');
+  if (!Number.isInteger(dim) || dim <= 0) {
+    throw new Error('Embedding size is not set. Set EMBED_DIM in .env.');
+  }
+  return { url: url.replace(/\/+$/, ''), model, dim };
+}
+
+// Scales a vector to length 1
+export function normalize(vector) {
+  const length = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  if (!length) throw new Error('The embedding model returned a zero vector.');
+  return Float32Array.from(vector, (value) => value / length);
+}
+
+// Returns one normalized Float32Array per text, using Ollama with at most 32 texts per call
+export async function embed(texts) {
+  const { url, model, dim } = embeddingConfig();
+  const vectors = [];
+
+  for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
+    const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
+
+    let res;
+    try {
+      res = await fetch(`${url}/api/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, input: batch }),
+      });
+    } catch {
+      throw new Error(EMBEDDING_UNREACHABLE_ERROR);
+    }
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(`Embedding request failed: ${body?.error || `status ${res.status}`}.`);
+    }
+
+    const { embeddings } = await res.json();
+    if (!Array.isArray(embeddings) || embeddings.length !== batch.length) {
+      throw new Error('The embedding service returned an unexpected response.');
+    }
+    for (const vector of embeddings) {
+      if (vector.length !== dim) {
+        throw new Error(`Embedding has ${vector.length} values, but EMBED_DIM is ${dim}.`);
+      }
+      vectors.push(normalize(vector));
+    }
+  }
+  return vectors;
+}

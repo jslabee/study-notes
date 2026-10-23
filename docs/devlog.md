@@ -161,3 +161,56 @@
 **Git:** branch feature/scaffold, changed files: 10
 
 **My changes and outcome:** 
+
+### 23/10/2026, 21:41:24
+
+**Prompt:**
+
+> <pasted_content id="a2c1">
+> Implement material indexing according to `docs/spec.md`, subsection **"RAG Search"**.
+> 
+> 1. **`server/rag/chunk.js` — Text chunking**
+>    - Split text into chunks of approximately 400 words.
+>    - Use approximately 60 words of overlap between consecutive chunks.
+>    - Always split at sentence boundaries.
+>    - Add tests for chunk size, overlap, and sentence-boundary splitting.
+> 
+> 2. **Embedding generation in `server/llm.js`**
+>    - Add a function that calls `POST {OLLAMA_URL}/api/embed` using the model specified by `EMBED_MODEL`.
+>    - Send no more than 32 texts per request.
+>    - Normalize every embedding vector to unit length (length 1).
+>    - Validate that every vector has exactly `EMBED_DIM` elements.
+> 
+> 3. **`server/rag/index.js` — Indexing**
+>    - Replace the existing placeholder `"index"` job in `server/jobs.js` with actual indexing.
+>    - Split each material's text into chunks.
+>    - Store the chunks in the `chunks` table and their embedding vectors in `chunk_vectors`, using `rowid = chunks.id`.
+>    - Set the material status to `ready` when indexing succeeds.
+>    - If Ollama is unreachable, set the material status to `error` and use this exact error message: `"Embedding service (Ollama) is not reachable."`
+>    - When deleting a material, delete its vectors first, then its chunks, and finally the material.
+> 
+> 4. **Material API**
+>    - Update `GET /api/materials/:id` to include `chunkCount`.
+> 
+> 5. **Reindexing script**
+>    - Add an `npm run reindex` script that reindexes all existing materials.
+> 
+> 6. **Tests**
+>    - Test chunk size, overlap, and sentence-boundary splitting.
+>    - Test that deleting a material also removes its chunks and vectors.
+>    - Keep tests local and deterministic. Do not require a running Ollama service for unit tests; mock the embedding function where appropriate.
+> 
+> Do not implement search or answer generation yet.
+> 
+> Follow `CLAUDE.md` and the existing project conventions. Read `docs/spec.md` carefully and follow its requirements wherever they provide more specific instructions than this prompt. Do not change unrelated functionality.
+> 
+> Run `npm test` and the client build when finished. Report the changed files, test results, build result, and any decisions or ambiguities. Do not commit or push changes.
+> </pasted_content id="a2c1">
+
+**Summary:** Built Step 5 indexing: sentence-based chunking in server/rag/chunk.js, Ollama embeddings in server/llm.js, indexing and delete in server/rag/index.js, npm run reindex (server/rag/reindex.js), the real index job in server/jobs.js and delete via deleteChunks in store.js, with tests using a fake Ollama; npm test passed 57 of 57, the client build succeeded and a real bge-m3 embedding returned 1024 values.
+
+**Type:** implementation
+
+**Git:** branch feature/scaffold, changed files: 11
+
+**My changes and outcome:** 
