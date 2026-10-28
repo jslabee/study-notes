@@ -3,23 +3,25 @@ import * as sqliteVec from 'sqlite-vec';
 import fs from 'node:fs';
 import path from 'node:path';
 
+const MATERIALS_COLUMNS = `
+  id INTEGER PRIMARY KEY,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('text','txt','srt','vtt','pdf')),
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'processing'
+    CHECK (status IN ('processing','ready','error')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS courses (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS materials (
-  id INTEGER PRIMARY KEY,
-  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  title TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('text','txt','srt','vtt')),
-  content TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'processing'
-    CHECK (status IN ('processing','ready','error')),
-  error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+CREATE TABLE IF NOT EXISTS materials (${MATERIALS_COLUMNS});
 CREATE TABLE IF NOT EXISTS notes (
   id INTEGER PRIMARY KEY,
   material_id INTEGER NOT NULL UNIQUE REFERENCES materials(id) ON DELETE CASCADE,
@@ -53,11 +55,38 @@ export function getDb() {
   sqliteVec.load(db);
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
+  migrateMaterialsType(db);
   // one vector per chunk; rowid = chunks.id
   db.exec(
     `CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(embedding float[${embedDim}]);`
   );
   return db;
+}
+
+// Databases created before PDF import do not allow type 'pdf'. SQLite cannot alter a CHECK
+// constraint, so the table is rebuilt with foreign keys off (otherwise dropping it would
+// cascade to notes and chunks); the row ids stay the same, so all references stay valid.
+function migrateMaterialsType(db) {
+  const { sql } = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'materials'")
+    .get();
+  if (sql.includes("'pdf'")) return;
+
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`CREATE TABLE materials_new (${MATERIALS_COLUMNS});
+        INSERT INTO materials_new (id, course_id, title, type, content, status, error, created_at)
+          SELECT id, course_id, title, type, content, status, error, created_at FROM materials;
+        DROP TABLE materials;
+        ALTER TABLE materials_new RENAME TO materials;`);
+      if (db.pragma('foreign_key_check').length > 0) {
+        throw new Error('Migration of the materials table broke foreign keys.');
+      }
+    })();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
 }
 
 export function closeDb() {

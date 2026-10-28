@@ -362,3 +362,101 @@
 **Prompt:**
 
 > git add .
+
+**Summary:** Staged five changes with git add . (README.md, docs/devlog.md, eval/run.js, eval/titles.js, tests/eval-titles.test.js) on branch feature/scaffold; nothing was committed.
+
+**Type:** question
+
+**Git:** branch feature/scaffold, changed files: 5
+
+**My changes and outcome:** 
+
+### 28/10/2026, 13:51:32
+
+**Prompt:**
+
+> <pasted_content id="9afb">
+> Add PDF import using the library unpdf (I approve this dependency; install it).
+> 
+> 1. server/materials/convert.js: add the pdf type. Use unpdf to extract the text of
+>    all pages, then clean it:
+>    - join words hyphenated at line ends,
+>    - remove standalone page numbers,
+>    - remove repeated page headers and footers (a line that appears identically on
+>      more than half of the pages),
+>    - merge lines into paragraphs and collapse extra whitespace.
+> 2. If the PDF has no text layer (scanned document) or the extracted text is empty,
+>    return the error "This PDF contains no selectable text (scanned documents are
+>    not supported)."
+> 3. Limits: PDF files up to 30 MB, extracted text up to 5 MB; TXT, SRT and VTT stay
+>    at 5 MB. Error messages must state which limit was exceeded. Update the multer
+>    limits accordingly.
+> 4. Database: add 'pdf' to the allowed values of materials.type. SQLite cannot alter
+>    a CHECK constraint, so add a migration in server/db.js that rebuilds the
+>    materials table and keeps all existing data and foreign keys intact.
+> 5. UI: accept .pdf in the file upload and change the supported-files text to
+>    "TXT, SRT, VTT or PDF (max 30 MB)".
+> 6. Tests: generate a small two-page sample PDF in tests/fixtures/ (keep the
+>    generator script there), and add tests for conversion, cleanup (hyphenation,
+>    page numbers, headers/footers), rejection of a PDF without text, and the
+>    migration keeping existing rows.
+> 7. Run npm test and make sure all tests pass.
+> Do not change other modules.
+> </pasted_content id="9afb">
+
+### 28/10/2026, 13:53:48
+
+**Prompt:**
+
+> Redesign the client UI (client/) using the layout and interaction patterns of
+Google NotebookLM as a reference. Copy the structure and UX, not the branding: no
+Google logos, names or product colors. Do not change the API, the server or the
+app's behavior. Use plain CSS with CSS variables; do not add a UI library.
+
+1. Home screen: courses shown as a grid of cards (course name, number of materials,
+   last update) with a prominent "New course" card. Clicking a card opens the
+   course workspace.
+2. Course workspace with three panels:
+   - Left "Sources" panel: list of materials with type icon, title and status
+     badge (Processing with a spinner, Ready, Error with the error message on
+     hover). Each source has a checkbox, all checked by default, plus
+     "Select all" / "Clear". Send the ids of the checked sources as materialIds
+     with every question. An "Add source" button opens a modal with two tabs,
+     "Upload file" (drag and drop area, accepted types TXT, SRT, VTT, PDF and the
+     size limits, selected file name and size) and "Paste text". A delete action
+     per source with confirmation.
+   - Center "Chat" panel: conversation with the selected sources. Messages as
+     bubbles, the input fixed at the bottom, Enter to send and Shift+Enter for a
+     new line, a "Searching..." indicator, and a note showing how many sources are
+     selected. Citations [n] in answers render as small numbered chips; clicking a
+     chip opens a popover with the source title and the cited excerpt, plus a link
+     that opens the source. Show 3 suggested starter questions when the chat is
+     empty.
+   - Right "Notes" panel: for the selected source, show its notes (Summary, Key
+     points, Terms) with readable typography, a "Generate notes" / "Regenerate"
+     button, a progress state while notes are processing, and a "Copy" button.
+     Clicking a source title in the left panel selects it here.
+3. Source viewer: opening a source shows its full text in a reading view with a
+   comfortable line width, and a back button to the workspace.
+4. States everywhere: skeleton loaders while loading, empty states that tell the
+   user what to do next ("Add your first source"), clear error messages with a
+   retry button, toast messages for completed uploads and deletions.
+5. Visual design: one design-token file (colors, spacing scale, radius, font
+   sizes, shadows), a clean neutral palette with one accent color, consistent
+   buttons and inputs, light and dark theme following the system setting.
+6. Accessibility and responsiveness: labels for all inputs, visible keyboard
+   focus, sufficient contrast, collapsible side panels; on narrow screens the
+   three panels become tabs (Sources, Chat, Notes).
+7. Code organization: one component per file in client/src/components/, views in
+   client/src/views/, styles in client/src/styles/.
+8. Run npm run build and make sure it succeeds, then check that all existing
+   functions still work: create a course, add sources (including a PDF), generate
+   notes, ask a question with all sources and with only some sources selected.
+
+**Summary:** Added PDF import with unpdf: text extraction and cleanup in server/materials/convert.js, per-type size limits in server/index.js, a materials-table rebuild migration in server/db.js, .pdf support in client/src/views/Materials.jsx, and a PDF fixture generator plus conversion, cleanup, upload and migration tests in tests/.
+
+**Type:** implementation
+
+**Git:** branch newUI, changed files: 14
+
+**My changes and outcome:** 

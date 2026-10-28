@@ -14,11 +14,14 @@ uporabljen za analizo razvoja z orodjem umetne inteligence.
 ## Funkcije različice 1.0
 1. Tečaji (courses): uporabnik ustvari tečaj, ki združuje gradiva.
 2. Uvoz gradiv (materials): gradivo prilepi kot besedilo ali naloži datoteko TXT, SRT ali VTT
-do 5 MB. To zadostuje za knjigo do približno 800 strani besedila.
+do 5 MB. To zadostuje za knjigo do približno 800 strani besedila. Po različici 1.0 je
+dodan še uvoz PDF do 30 MB (izluščeno besedilo največ 5 MB); glej »Nadgradnje po
+različici 1.0«.
 3. Zapiski (notes): za vsako gradivo pripravi zapiske v enotni obliki (Summary, Key points,
 Terms), tudi za zelo dolga gradiva.
 4. Vprašanja o snovi (RAG): uporabnik zastavi vprašanje, aplikacija poišče ustrezne
 odseke v vseh gradivih in odgovori s sklicem na vir. Če odgovora v gradivih ni, to pove.
+Po različici 1.0 lahko uporabnik iskanje omeji na izbrana gradiva (materialIds).
 Kaj
 ## Jezik
 Ta dokument in navodila za Claude Code v
@@ -39,7 +42,9 @@ izbrisano gradivo se takoj odstrani.
 prikazuje stanje obdelave.
 Ni del različice 1.0: prijava uporabnikov in pravice, kvizi, uvoz datotek PDF in DOCX
 (uporabnik jih lahko sam shrani kot TXT), podpora za druge jezike, samodejni prenos
-transkriptov s spletnih platform, objava na javnem strežniku.
+transkriptov s spletnih platform, objava na javnem strežniku. Uvoz PDF je dodan kot
+nadgradnja po različici 1.0; DOCX in skenirani PDF (brez besedilnega sloja) ostajata
+nepodprta.
 ## Tehnologije
 Celotna aplikacija je v JavaScriptu: strežnik v Node.js, vmesnik v Reactu. Izbira je končna,
 nove odvisnosti se dodajajo samo, če jih zahteva korak v tem navodilu.
@@ -110,6 +115,10 @@ Branje datotek
 TXT neposredno, lastna funkcija
 za SRT in VTT
 brez dodatnih knjižnic
+Branje PDF (nadgradnja)
+unpdf
+izluščenje besedila iz PDF z
+besedilnim slojem
 Hkratni zagon
 concurrently
 en ukaz zažene strežnik in
@@ -151,7 +160,9 @@ study-notes/
 │  └─ src/
 │     ├─ App.jsx             navigacija med pogledi
 │     ├─ api.js              klici /api
-│     └─ views/              Materials.jsx, Material.jsx, Ask.jsx
+│     ├─ views/              Materials.jsx, Material.jsx, Ask.jsx (po prenovi: pogledi)
+│     ├─ components/         po prenovi vmesnika: ena komponenta na datoteko
+│     └─ styles/             po prenovi vmesnika: oblikovni žetoni in slogi
 ├─ tests/                    testi node:test
 ├─ eval/                     questions.json in run.js
 ├─ data/                     baza app.db (v .gitignore)
@@ -177,7 +188,7 @@ CREATE TABLE IF NOT EXISTS materials (
   id INTEGER PRIMARY KEY,
   course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('text','txt','srt','vtt')),
+  type TEXT NOT NULL CHECK (type IN ('text','txt','srt','vtt','pdf')),
   content TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'processing'
     CHECK (status IN ('processing','ready','error')),
@@ -229,6 +240,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(embedding
 float[1024]);
 Virtualna tabela chunk_vectors  ne pozna tujih ključev, zato mora koda ob brisanju
 gradiva vektorje njegovih kosov izbrisati sama, preden se izbrišejo kosi.
+Vrednost 'pdf' v stolpcu materials.type je dodana z nadgradnjo za PDF. Ker SQLite ne
+podpira spremembe omejitve CHECK, server/db.js obstoječo bazo posodobi z migracijo, ki
+tabelo materials prenese v novo obliko in ohrani vse podatke.
 ## API
 Vse poti vračajo JSON. Napake vrnejo ustrezno kodo HTTP in telo { "error": "message
 in English" } .
@@ -276,7 +290,13 @@ error, createdAt }  ali 404
 
 Omejitve vhoda. Naložena datoteka in prilepljeno besedilo imata največ 5 MB (pri multer
 je treba nastaviti fileSize  in fieldSize ). Vrsta gradiva se določi po končnici datoteke;
-prilepljeno besedilo ima vrsto text .
+prilepljeno besedilo ima vrsto text . Po nadgradnji za PDF: datoteka PDF ima največ
+30 MB, izluščeno besedilo največ 5 MB; PDF brez besedilnega sloja vrne napako "This PDF
+contains no selectable text (scanned documents are not supported)." Podprte datoteke:
+TXT, SRT, VTT in PDF.
+Izbira gradiv pri vprašanjih. POST /api/ask sprejme tudi neobvezno polje materialIds,
+npr. { "question": "...", "courseId": 1, "materialIds": [3, 5, 8] }. Če je podano in ni
+prazno, se išče samo po kosih teh gradiv; neobstoječi id vrne napako 400.
 Obdelava v ozadju. Knjiga s 800 stranmi ima približno 2–3 MB besedila, kar pomeni več kot
 tisoč kosov za iskanje in več deset klicev jezikovnega modela za zapiske. To lahko traja
 nekaj minut, zato:
@@ -303,8 +323,8 @@ POST
 ponovna priprava) se začne v
 ozadju
 POST /api/ask
-{ question, courseId?
-}
+{ question, courseId?,
+materialIds? }
 { answer, sources: [{ n,
 materialId, title,
 chunkId, text }] }
@@ -379,7 +399,8 @@ Normalizacija
 vsak vektor normaliziraj na dolžino 1 pred
 shranjevanjem in pred iskanjem
 Število najdenih kosov
-6 najbolj podobnih; pri filtru po tečaju najprej 30,
+6 najbolj podobnih; pri filtru po tečaju ali po
+izbranih gradivih (materialIds) najprej 30,
 nato filtriraj in obdrži 6
 
 ## Postopek gradnje
@@ -651,6 +672,116 @@ Iz čiste kopije repozitorija ( git clone , npm install , npm --prefix client in
 Ko so merila izpolnjena, združi vejo v main  in dodaj oznako v1.0 . Aplikacija je s tem
 končana, dnevnik razvoja v docs/devlog.md  pa vsebuje celoten potek gradnje. Postavitev
 v kontejner (Docker) sledi po različici 1.0.
+## Nadgradnje po različici 1.0
+Trije dodatni koraki, vsak na svoji veji, v tem vrstnem redu. Pred prvim v CLAUDE.md
+dodaj unpdf med tehnologije (glej Prilogo). Navodila za Claude Code so v angleščini.
+Po vsakem koraku: git diff, npm test, ročni preizkus v brskalniku, vrstica »My changes
+and outcome« v dnevniku, nato commit in združitev v main:
+git add . && git commit -m "<short English description>"
+git switch main && git merge --no-ff feature/<ime> && git push
+### Nadgradnja 1 – Uvoz PDF
+Veja feature/pdf-import .
+```text
+Add PDF import using the library unpdf (I approve this dependency; install it).
+
+1. server/materials/convert.js: add the pdf type. Use unpdf to extract the text of
+   all pages, then clean it:
+   - join words hyphenated at line ends,
+   - remove standalone page numbers,
+   - remove repeated page headers and footers (a line that appears identically on
+     more than half of the pages),
+   - merge lines into paragraphs and collapse extra whitespace.
+2. If the PDF has no text layer (scanned document) or the extracted text is empty,
+   return the error "This PDF contains no selectable text (scanned documents are
+   not supported)."
+3. Limits: PDF files up to 30 MB, extracted text up to 5 MB; TXT, SRT and VTT stay
+   at 5 MB. Error messages must state which limit was exceeded. Update the multer
+   limits accordingly.
+4. Database: add 'pdf' to the allowed values of materials.type. SQLite cannot alter
+   a CHECK constraint, so add a migration in server/db.js that rebuilds the
+   materials table and keeps all existing data and foreign keys intact.
+5. UI: accept .pdf in the file upload and change the supported-files text to
+   "TXT, SRT, VTT or PDF (max 30 MB)".
+6. Tests: generate a small two-page sample PDF in tests/fixtures/ (keep the
+   generator script there), and add tests for conversion, cleanup (hyphenation,
+   page numbers, headers/footers), rejection of a PDF without text, and the
+   migration keeping existing rows.
+7. Run npm test and make sure all tests pass.
+Do not change other modules.
+```
+Preverjanje
+Pravi PDF (skripta ali poglavje knjige) se naloži, besedilo je berljivo in brez številk
+strani ter ponavljajočih se glav.
+Za PDF se pripravijo zapiski in vprašanje najde odgovor v njem.
+Skeniran PDF vrne jasno napako.
+Gradiva, naložena pred nadgradnjo, so še vedno v bazi.
+npm test  uspe.
+### Nadgradnja 2 – Izbira gradiv pri vprašanjih
+Veja feature/source-selection .
+```text
+Extend POST /api/ask to accept an optional materialIds array, e.g.
+{ "question": "...", "courseId": 1, "materialIds": [3, 5, 8] }.
+If materialIds is provided and not empty, search only chunks from those materials
+(apply the same "fetch 30, filter, keep 6" approach as for courseId). If it is
+omitted, keep the current behavior. Validate that the ids exist and return a 400
+error with a clear message if not. Add tests for searching with and without
+materialIds. Run npm test and make sure all tests pass. Do not change other
+modules.
+```
+Preverjanje
+npm test  uspe; vmesnik se v tem koraku ne spremeni.
+### Nadgradnja 3 – Prenova vmesnika po zgledu NotebookLM
+Veja feature/ui-ux .
+```text
+Redesign the client UI (client/) using the layout and interaction patterns of
+Google NotebookLM as a reference. Copy the structure and UX, not the branding: no
+Google logos, names or product colors. Do not change the API, the server or the
+app's behavior. Use plain CSS with CSS variables; do not add a UI library.
+
+1. Home screen: courses shown as a grid of cards (course name, number of materials,
+   last update) with a prominent "New course" card. Clicking a card opens the
+   course workspace.
+2. Course workspace with three panels:
+   - Left "Sources" panel: list of materials with type icon, title and status
+     badge (Processing with a spinner, Ready, Error with the error message on
+     hover). Each source has a checkbox, all checked by default, plus
+     "Select all" / "Clear". Send the ids of the checked sources as materialIds
+     with every question. An "Add source" button opens a modal with two tabs,
+     "Upload file" (drag and drop area, accepted types TXT, SRT, VTT, PDF and the
+     size limits, selected file name and size) and "Paste text". A delete action
+     per source with confirmation.
+   - Center "Chat" panel: conversation with the selected sources. Messages as
+     bubbles, the input fixed at the bottom, Enter to send and Shift+Enter for a
+     new line, a "Searching..." indicator, and a note showing how many sources are
+     selected. Citations [n] in answers render as small numbered chips; clicking a
+     chip opens a popover with the source title and the cited excerpt, plus a link
+     that opens the source. Show 3 suggested starter questions when the chat is
+     empty.
+   - Right "Notes" panel: for the selected source, show its notes (Summary, Key
+     points, Terms) with readable typography, a "Generate notes" / "Regenerate"
+     button, a progress state while notes are processing, and a "Copy" button.
+     Clicking a source title in the left panel selects it here.
+3. Source viewer: opening a source shows its full text in a reading view with a
+   comfortable line width, and a back button to the workspace.
+4. States everywhere: skeleton loaders while loading, empty states that tell the
+   user what to do next ("Add your first source"), clear error messages with a
+   retry button, toast messages for completed uploads and deletions.
+5. Visual design: one design-token file (colors, spacing scale, radius, font
+   sizes, shadows), a clean neutral palette with one accent color, consistent
+   buttons and inputs, light and dark theme following the system setting.
+6. Accessibility and responsiveness: labels for all inputs, visible keyboard
+   focus, sufficient contrast, collapsible side panels; on narrow screens the
+   three panels become tabs (Sources, Chat, Notes).
+7. Code organization: one component per file in client/src/components/, views in
+   client/src/views/, styles in client/src/styles/.
+8. Run npm run build and make sure it succeeds, then check that all existing
+   functions still work: create a course, add sources (including a PDF), generate
+   notes, ask a question with all sources and with only some sources selected.
+```
+Preverjanje
+npm run build  uspe.
+Vse funkcije iz točke 8 delujejo; odgovor pri nekaj izbranih virih navaja samo te vire.
+Na ozkem oknu so paneli prikazani kot zavihki; temna tema deluje.
 ## Priloga: CLAUDE.md in samodejni dnevnik razvoja
 Dnevnik nastaja iz dveh virov. Claude Code ob vsakem tvojem navodilu sproži skripto
 (hook), ki navodilo dobesedno zapiše. Ko Claude Code konča odgovor, ista skripta iz
@@ -675,7 +806,7 @@ model and
 - Materials are in English. No other languages need to be supported.
 ## Tech stack
 - Server: Node.js (ES modules), Express, multer, better-sqlite3, sqlite-vec,
-openai
+openai, unpdf
 - Client: React with Vite in client/, react-markdown, no router library
 - Embeddings: Ollama, model bge-m3
 - Tests: node:test (npm test)
