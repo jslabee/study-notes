@@ -7,7 +7,7 @@ import { getDb } from './db.js';
 import { enqueue, restoreJobs } from './jobs.js';
 import { EMBEDDING_UNREACHABLE_ERROR } from './llm.js';
 import { answerQuestion } from './rag/answer.js';
-import { convertToText } from './materials/convert.js';
+import { convertToText, pdfToText } from './materials/convert.js';
 import {
   createMaterial,
   deleteMaterial,
@@ -18,16 +18,27 @@ import {
 const serverDir = path.dirname(fileURLToPath(import.meta.url));
 const clientDist = path.join(serverDir, '..', 'client', 'dist');
 
-const MAX_SIZE = 5 * 1024 * 1024;
-const FILE_TYPES = { '.txt': 'txt', '.srt': 'srt', '.vtt': 'vtt' };
-const UNSUPPORTED_FILE_ERROR = 'Supported files are TXT, SRT and VTT.';
+const MB = 1024 * 1024;
+// Pasted text, TXT, SRT and VTT files and the text extracted from a PDF
+const MAX_TEXT_SIZE = 5 * MB;
+const MAX_PDF_SIZE = 30 * MB;
+const FILE_TYPES = { '.txt': 'txt', '.srt': 'srt', '.vtt': 'vtt', '.pdf': 'pdf' };
+const UNSUPPORTED_FILE_ERROR = 'Supported files are TXT, SRT, VTT and PDF.';
+const TEXT_FILE_TOO_LARGE_ERROR = 'TXT, SRT and VTT files can be at most 5 MB.';
+const PDF_TOO_LARGE_ERROR = 'PDF files can be at most 30 MB.';
+const PDF_TEXT_TOO_LARGE_ERROR = 'The text extracted from the PDF is larger than 5 MB.';
+const PASTED_TEXT_TOO_LARGE_ERROR = 'Pasted text can be at most 5 MB.';
 
+// multer has a single file size limit, so it allows the largest (PDF) and text files are
+// checked against their own limit in the route
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_SIZE, fieldSize: MAX_SIZE, files: 1 },
+  limits: { fileSize: MAX_PDF_SIZE, fieldSize: MAX_TEXT_SIZE, files: 1 },
   fileFilter: (req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    if (FILE_TYPES[ext]) cb(null, true);
+    const type = FILE_TYPES[path.extname(file.originalname).toLowerCase()];
+    // Remembered so the error handler can name the limit that was exceeded
+    req.uploadType = type;
+    if (type) cb(null, true);
     else cb(httpError(400, UNSUPPORTED_FILE_ERROR));
   },
 });
@@ -43,6 +54,23 @@ function parseId(value, name) {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) throw httpError(400, `Invalid ${name}.`);
   return id;
+}
+
+// Optional list of materials to search; omitted, null or empty means no material filter
+function parseMaterialIds(value) {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || !value.every((id) => Number.isInteger(id) && id > 0)) {
+    throw httpError(400, 'materialIds must be an array of material ids.');
+  }
+  const ids = [...new Set(value)];
+  if (ids.length === 0) return undefined;
+
+  const exists = getDb().prepare('SELECT 1 FROM materials WHERE id = ?');
+  const unknown = ids.filter((id) => !exists.get(id));
+  if (unknown.length > 0) {
+    throw httpError(400, `Unknown material ids: ${unknown.join(', ')}.`);
+  }
+  return ids;
 }
 
 export const app = express();
@@ -82,7 +110,7 @@ app.get('/api/materials', (req, res) => {
   res.json(listMaterials(courseId));
 });
 
-app.post('/api/materials', upload.single('file'), (req, res) => {
+app.post('/api/materials', upload.single('file'), async (req, res) => {
   const courseId = parseId(req.body?.courseId, 'course id');
   const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
   const text = req.body?.text;
@@ -96,13 +124,21 @@ app.post('/api/materials', upload.single('file'), (req, res) => {
   if (!file && text === undefined) throw httpError(400, 'Provide text or a file.');
 
   const type = file ? FILE_TYPES[path.extname(file.originalname).toLowerCase()] : 'text';
-  const raw = file ? file.buffer.toString('utf8') : String(text);
+  if (file && type !== 'pdf' && file.size > MAX_TEXT_SIZE) {
+    throw httpError(413, TEXT_FILE_TOO_LARGE_ERROR);
+  }
 
   let content;
   try {
-    content = convertToText(raw, type);
+    content =
+      type === 'pdf'
+        ? await pdfToText(file.buffer)
+        : convertToText(file ? file.buffer.toString('utf8') : String(text), type);
   } catch (err) {
     throw httpError(400, err.message);
+  }
+  if (type === 'pdf' && Buffer.byteLength(content) > MAX_TEXT_SIZE) {
+    throw httpError(413, PDF_TEXT_TOO_LARGE_ERROR);
   }
 
   const id = createMaterial({ courseId, title, type, content });
@@ -168,8 +204,10 @@ app.post('/api/ask', async (req, res) => {
     }
   }
 
+  const materialIds = parseMaterialIds(req.body?.materialIds);
+
   try {
-    res.json(await answerQuestion(question, { courseId }));
+    res.json(await answerQuestion(question, { courseId, materialIds }));
   } catch (err) {
     // Failures of Ollama or OpenAI are reported with their readable message
     console.error(err);
@@ -193,9 +231,12 @@ if (fs.existsSync(clientDist)) {
 // Unified error handling: always respond with { error } and a matching HTTP status
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FIELD_VALUE') {
+    if (err.code === 'LIMIT_FILE_SIZE') {
       err.status = 413;
-      err.message = 'The file or text is larger than 5 MB.';
+      err.message = req.uploadType === 'pdf' ? PDF_TOO_LARGE_ERROR : TEXT_FILE_TOO_LARGE_ERROR;
+    } else if (err.code === 'LIMIT_FIELD_VALUE') {
+      err.status = 413;
+      err.message = PASTED_TEXT_TOO_LARGE_ERROR;
     } else {
       err.status = 400;
     }

@@ -17,9 +17,9 @@ export function answerMessage(question, chunks) {
 // Answers a question from the most similar chunks; complete and embed are replaceable for tests
 export async function answerQuestion(
   question,
-  { courseId, complete = llmComplete, embed } = {}
+  { courseId, materialIds, complete = llmComplete, embed } = {}
 ) {
-  const chunks = await searchChunks(question, { courseId, embed });
+  const chunks = await searchChunks(question, { courseId, materialIds, embed });
 
   const sources = chunks.map((chunk, i) => ({
     n: i + 1,

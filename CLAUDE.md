@@ -7,7 +7,7 @@ Internal web app for Abakus plus. It turns learning materials (lecture transcrip
 - Materials are in English. No other languages need to be supported.
 
 ## Tech stack
-- Server: Node.js (ES modules), Express, multer, better-sqlite3, sqlite-vec, openai
+- Server: Node.js (ES modules), Express, multer, better-sqlite3, sqlite-vec, openai, unpdf
 - Client: React with Vite in client/, react-markdown, no router library
 - Embeddings: Ollama, model bge-m3
 - Tests: node:test (npm test)

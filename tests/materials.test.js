@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { installFakeOllama } from './helpers/fake-ollama.js';
+import { buildPdf, textStream } from './fixtures/make-pdf.js';
 
 // Every run uses its own temporary database; indexing uses fake embeddings
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'study-notes-test-'));
@@ -132,22 +133,84 @@ test('deleting a material removes it with its notes, chunks and vectors', async 
 test('unsupported file type is rejected with the exact message', async () => {
   const res = await postMaterial(
     { courseId, title: 'Slides' },
-    { name: 'slides.pdf', content: '%PDF-1.4' }
+    { name: 'slides.docx', content: 'PK' }
   );
   assert.equal(res.status, 400);
-  assert.deepEqual(await res.json(), { error: 'Supported files are TXT, SRT and VTT.' });
+  assert.deepEqual(await res.json(), { error: 'Supported files are TXT, SRT, VTT and PDF.' });
 });
 
-test('file larger than 5 MB is rejected', async () => {
+test('PDF file is converted to clean text', async () => {
+  const content = fs.readFileSync(new URL('./fixtures/sample.pdf', import.meta.url));
+  const res = await postMaterial({ courseId, title: 'Biology' }, { name: 'biology.PDF', content });
+  assert.equal(res.status, 202);
+  const { id } = await res.json();
+  await whenIdle();
+
+  const material = await (await fetch(`${baseUrl}/api/materials/${id}`)).json();
+  assert.equal(material.type, 'pdf');
+  assert.equal(material.status, 'ready');
+  assert.match(material.content, /^Photosynthesis .* chloroplasts /);
+  assert.doesNotMatch(material.content, /Introduction to Biology|Lecture notes/);
+});
+
+test('PDF without selectable text is rejected with the exact message', async () => {
+  const content = fs.readFileSync(new URL('./fixtures/no-text.pdf', import.meta.url));
+  const res = await postMaterial({ courseId, title: 'Scan' }, { name: 'scan.pdf', content });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), {
+    error: 'This PDF contains no selectable text (scanned documents are not supported).',
+  });
+});
+
+test('PDF larger than 5 MB passes the size check; over 30 MB is rejected', async () => {
+  // Not a valid PDF, so a file that passes the size limit fails on conversion instead
+  const fits = await postMaterial(
+    { courseId, title: 'Big PDF' },
+    { name: 'big.pdf', content: Buffer.alloc(30 * 1024 * 1024, 'a') }
+  );
+  assert.equal(fits.status, 400);
+  assert.deepEqual(await fits.json(), { error: 'The file is not a valid PDF.' });
+
+  const res = await postMaterial(
+    { courseId, title: 'Too big PDF' },
+    { name: 'big.pdf', content: Buffer.alloc(30 * 1024 * 1024 + 1, 'a') }
+  );
+  assert.equal(res.status, 413);
+  assert.deepEqual(await res.json(), { error: 'PDF files can be at most 30 MB.' });
+});
+
+test('PDF with more than 5 MB of text is rejected', async () => {
+  // pdf.js ignores text outside the page, so the long lines need the largest page size
+  const pages = [0, 1, 2].map((page) =>
+    textStream(
+      Array.from({ length: 1000 }, (_, i) => [10, 14390 - i * 14, `Page ${page} line ${i} ${'word '.repeat(380)}`])
+    )
+  );
+  const content = buildPdf(pages, { width: 14400, height: 14400 });
+  const res = await postMaterial({ courseId, title: 'Long PDF' }, { name: 'long.pdf', content });
+  assert.equal(res.status, 413);
+  assert.deepEqual(await res.json(), {
+    error: 'The text extracted from the PDF is larger than 5 MB.',
+  });
+});
+
+test('text file larger than 5 MB is rejected', async () => {
   const content = Buffer.alloc(5 * 1024 * 1024 + 1, 'a');
   const res = await postMaterial({ courseId, title: 'Too big' }, { name: 'big.txt', content });
   assert.equal(res.status, 413);
-  assert.equal(typeof (await res.json()).error, 'string');
+  assert.deepEqual(await res.json(), { error: 'TXT, SRT and VTT files can be at most 5 MB.' });
+
+  // Above the PDF limit, multer rejects the file before the route sees it
+  const huge = Buffer.alloc(30 * 1024 * 1024 + 1, 'a');
+  const res2 = await postMaterial({ courseId, title: 'Too big' }, { name: 'huge.vtt', content: huge });
+  assert.equal(res2.status, 413);
+  assert.deepEqual(await res2.json(), { error: 'TXT, SRT and VTT files can be at most 5 MB.' });
 });
 
 test('pasted text larger than 5 MB is rejected', async () => {
   const res = await postMaterial({ courseId, title: 'Too big', text: 'a'.repeat(5 * 1024 * 1024 + 1) });
   assert.equal(res.status, 413);
+  assert.deepEqual(await res.json(), { error: 'Pasted text can be at most 5 MB.' });
 });
 
 test('file of exactly 5 MB is accepted', async () => {

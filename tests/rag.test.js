@@ -112,6 +112,57 @@ test('with courseId, chunks outside the 30 nearest are not found', async () => {
   assert.deepEqual(await searchChunks('question', { courseId: courseA, embed: questionEmbed }), []);
 });
 
+test('with materialIds, the 30 nearest chunks are filtered to the first 6 of those materials', async () => {
+  const other = addMaterial(courseA, 'Not selected');
+  const first = addMaterial(courseA, 'Selected 1');
+  const second = addMaterial(courseB, 'Selected 2');
+  for (let i = 0; i < 20; i++) addChunk(other, 0.01 + i * 0.01); // ranks 1-20
+  for (let i = 0; i < 4; i++) addChunk(first, 0.3 + i * 0.02); // ranks 21, 23, 25, 27
+  for (let i = 0; i < 4; i++) addChunk(second, 0.31 + i * 0.02); // ranks 22, 24, 26, 28
+
+  const results = await searchChunks('question', { materialIds: [first, second], embed: questionEmbed });
+  // The 6 nearest of the selected chunks, in order of similarity
+  assert.deepEqual(
+    results.map((r) => r.title),
+    ['Selected 1', 'Selected 2', 'Selected 1', 'Selected 2', 'Selected 1', 'Selected 2']
+  );
+});
+
+test('with materialIds, chunks outside the 30 nearest are not found', async () => {
+  const other = addMaterial(courseA, 'Not selected');
+  const selected = addMaterial(courseA, 'Selected');
+  for (let i = 0; i < 30; i++) addChunk(other, 0.01 + i * 0.01);
+  addChunk(selected, 1.2);
+
+  assert.deepEqual(await searchChunks('question', { materialIds: [selected], embed: questionEmbed }), []);
+});
+
+test('without materialIds or with an empty list, all materials are searched', async () => {
+  const one = addMaterial(courseA, 'One');
+  const two = addMaterial(courseB, 'Two');
+  addChunk(one, 0.1);
+  addChunk(two, 0.2);
+
+  for (const materialIds of [undefined, []]) {
+    const results = await searchChunks('question', { materialIds, embed: questionEmbed });
+    assert.deepEqual(results.map((r) => r.title), ['One', 'Two']);
+  }
+});
+
+test('courseId and materialIds together keep only chunks matching both', async () => {
+  const inCourse = addMaterial(courseA, 'In course');
+  const otherCourse = addMaterial(courseB, 'Other course');
+  addChunk(inCourse, 0.1);
+  addChunk(otherCourse, 0.05);
+
+  const results = await searchChunks('question', {
+    courseId: courseA,
+    materialIds: [inCourse, otherCourse],
+    embed: questionEmbed,
+  });
+  assert.deepEqual(results.map((r) => r.title), ['In course']);
+});
+
 test('the question is embedded with the given embedding function', async () => {
   const seen = [];
   await searchChunks('What is ATP?', {

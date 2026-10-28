@@ -214,11 +214,11 @@ function Materials({ selectedCourseId, onCourseChange, onOpen }) {
             />
           ) : (
             <label className="field">
-              TXT, SRT or VTT, up to 5 MB
+              TXT, SRT, VTT or PDF (max 30 MB)
               <input
                 key={fileInputKey}
                 type="file"
-                accept=".txt,.srt,.vtt"
+                accept=".txt,.srt,.vtt,.pdf"
                 onChange={(e) => setFile(e.target.files[0] ?? null)}
                 disabled={uploading}
               />
