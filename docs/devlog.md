@@ -460,3 +460,26 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch newUI, changed files: 14
 
 **My changes and outcome:** 
+
+### 28/10/2026, 14:16:54
+
+**Prompt:**
+
+> <pasted_content id="9afb">
+> Extend POST /api/ask to accept an optional materialIds array, e.g.
+> { "question": "...", "courseId": 1, "materialIds": [3, 5, 8] }.
+> If materialIds is provided and not empty, search only chunks from those materials
+> (apply the same "fetch 30, filter, keep 6" approach as for courseId). If it is
+> omitted, keep the current behavior. Validate that the ids exist and return a 400
+> error with a clear message if not. Add tests for searching with and without
+> materialIds. Run npm test and make sure all tests pass. Do not change other
+> modules.
+> </pasted_content id="9afb">
+
+**Summary:** Added an optional materialIds filter to POST /api/ask: validation with clear 400 errors in server/index.js, passed through server/rag/answer.js, and a "fetch 30, filter, keep 6" material filter in server/rag/search.js, with new tests in tests/rag.test.js and tests/ask-api.test.js.
+
+**Type:** implementation
+
+**Git:** branch newUI, changed files: 6
+
+**My changes and outcome:** 

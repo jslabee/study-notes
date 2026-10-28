@@ -56,6 +56,23 @@ function parseId(value, name) {
   return id;
 }
 
+// Optional list of materials to search; omitted, null or empty means no material filter
+function parseMaterialIds(value) {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || !value.every((id) => Number.isInteger(id) && id > 0)) {
+    throw httpError(400, 'materialIds must be an array of material ids.');
+  }
+  const ids = [...new Set(value)];
+  if (ids.length === 0) return undefined;
+
+  const exists = getDb().prepare('SELECT 1 FROM materials WHERE id = ?');
+  const unknown = ids.filter((id) => !exists.get(id));
+  if (unknown.length > 0) {
+    throw httpError(400, `Unknown material ids: ${unknown.join(', ')}.`);
+  }
+  return ids;
+}
+
 export const app = express();
 
 app.use(express.json());
@@ -187,8 +204,10 @@ app.post('/api/ask', async (req, res) => {
     }
   }
 
+  const materialIds = parseMaterialIds(req.body?.materialIds);
+
   try {
-    res.json(await answerQuestion(question, { courseId }));
+    res.json(await answerQuestion(question, { courseId, materialIds }));
   } catch (err) {
     // Failures of Ollama or OpenAI are reported with their readable message
     console.error(err);

@@ -102,6 +102,36 @@ test('courseId limits sources to that course', async () => {
   assert.ok(body.sources.every((s) => s.title === 'Rome'));
 });
 
+test('materialIds limits sources to those materials', async () => {
+  const rome = getDb().prepare("SELECT id FROM materials WHERE title = 'Rome'").get().id;
+  const res = await ask({ question: 'How do plants get energy?', materialIds: [rome] });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.ok(body.sources.length > 0);
+  assert.ok(body.sources.every((s) => s.materialId === rome));
+});
+
+test('without materialIds, or with an empty list, all materials are searched', async () => {
+  for (const extra of [{}, { materialIds: [] }, { materialIds: null }]) {
+    const res = await ask({ question: 'Energy?', ...extra });
+    assert.equal(res.status, 200);
+    assert.deepEqual((await res.json()).sources.map((s) => s.title).sort(), ['Photosynthesis', 'Rome']);
+  }
+});
+
+test('unknown or invalid materialIds are rejected with a clear message', async () => {
+  const rome = getDb().prepare("SELECT id FROM materials WHERE title = 'Rome'").get().id;
+  let res = await ask({ question: 'x', materialIds: [rome, 9998, 9999] });
+  assert.equal(res.status, 400);
+  assert.deepEqual(await res.json(), { error: 'Unknown material ids: 9998, 9999.' });
+
+  for (const materialIds of [5, 'abc', ['3'], [1.5], [0]]) {
+    res = await ask({ question: 'x', materialIds });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'materialIds must be an array of material ids.' });
+  }
+});
+
 test('a course without materials gives the not-found answer without calling OpenAI', async () => {
   fakeOpenAI.requests.length = 0;
   const body = await (await ask({ question: 'Anything?', courseId: emptyCourse })).json();

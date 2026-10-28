@@ -5,12 +5,14 @@ export const RESULT_COUNT = 6;
 export const COURSE_CANDIDATES = 30;
 
 // Finds the chunks most similar to the question, only from ready materials.
-// With a courseId, the 30 nearest chunks are searched and the first 6 from that course kept.
+// With a courseId or a non-empty list of materialIds, the 30 nearest chunks are searched and
+// the first 6 that match every given filter are kept.
 // embed is replaceable so tests do not need Ollama.
-export async function searchChunks(question, { courseId, embed = llmEmbed } = {}) {
+export async function searchChunks(question, { courseId, materialIds, embed = llmEmbed } = {}) {
   const [vector] = await embed([question]);
   const filterByCourse = courseId !== undefined && courseId !== null;
-  const k = filterByCourse ? COURSE_CANDIDATES : RESULT_COUNT;
+  const materials = materialIds?.length ? new Set(materialIds) : null;
+  const k = filterByCourse || materials ? COURSE_CANDIDATES : RESULT_COUNT;
 
   const rows = getDb()
     .prepare(
@@ -30,6 +32,7 @@ export async function searchChunks(question, { courseId, embed = llmEmbed } = {}
 
   return rows
     .filter((row) => !filterByCourse || row.courseId === courseId)
+    .filter((row) => !materials || materials.has(row.materialId))
     .slice(0, RESULT_COUNT)
     .map(({ chunkId, materialId, title, text, distance }) => ({
       chunkId,
