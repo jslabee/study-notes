@@ -130,6 +130,18 @@ function migrateChapterColumns(db) {
   add('notes', 'chapters');
 }
 
+// The value of a JSON column (e.g. materials.outline, notes.chapters), or fallback when it is
+// empty or not valid JSON; an invalid value is logged instead of failing the request or job
+export function parseJson(value, fallback) {
+  if (value === null || value === undefined || value === '') return fallback;
+  try {
+    return JSON.parse(value);
+  } catch (err) {
+    console.warn(`[db] Ignoring a stored value that is not valid JSON: ${err.message}`);
+    return fallback;
+  }
+}
+
 export function closeDb() {
   if (db) {
     db.close();

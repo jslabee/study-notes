@@ -3,7 +3,7 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getDb } from './db.js';
+import { getDb, parseJson } from './db.js';
 import { enqueue, getNotesProgress, restoreJobs } from './jobs.js';
 import { EMBEDDING_UNREACHABLE_ERROR, PROVIDERS, getLlmModels, resolveLlm } from './llm.js';
 import { answerQuestion } from './rag/answer.js';
@@ -110,9 +110,11 @@ const STYLE_ORDER = new Map(NOTE_STYLES.map((style, i) => [style.id, i]));
 // Notes for the API: while they are being generated they include the job's progress
 // { phase, done, total, elapsedSeconds } (null when no job is known for them). by-chapter notes
 // include the detected chapters once they are known: { method, titles }, method outline, model,
-// topics or null (no chapters found; summarized by parts).
+// topics or null (no chapters found; summarized by parts). A stored detection that cannot be read
+// is left out.
 function withProgress({ id, chapters, ...notes }) {
-  const detection = chapters && JSON.parse(chapters);
+  const stored = parseJson(chapters, null);
+  const detection = Array.isArray(stored?.chapters) ? stored : null;
   const result = detection
     ? { ...notes, chapters: { method: detection.method, titles: detection.chapters.map((c) => c.title) } }
     : notes;

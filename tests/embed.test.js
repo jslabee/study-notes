@@ -1,7 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { installFakeOllama } from './helpers/fake-ollama.js';
-import { embed, normalize } from '../server/llm.js';
+import { embed, normalize, setRetryDelays } from '../server/llm.js';
 
 const fake = installFakeOllama({ dim: 8 });
 after(() => fake.restore());
@@ -42,11 +42,14 @@ test('vectors with a length other than EMBED_DIM are rejected', async () => {
 });
 
 test('unreachable Ollama gives the exact error message', async () => {
+  // The request is retried first; shorter delays keep the test fast
+  setRetryDelays({ baseMs: 1, rateLimitMs: 1 });
   fake.unreachable = true;
   try {
     await assert.rejects(embed(['x']), { message: 'Embedding service (Ollama) is not reachable.' });
   } finally {
     fake.unreachable = false;
+    setRetryDelays();
   }
 });
 

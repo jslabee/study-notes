@@ -16,6 +16,7 @@ const { app } = await import('../server/index.js');
 const { getDb, closeDb } = await import('../server/db.js');
 const { whenIdle } = await import('../server/jobs.js');
 const { ANSWER_SYSTEM_PROMPT } = await import('../server/rag/answer.js');
+const { setRetryDelays } = await import('../server/llm.js');
 
 let server;
 let baseUrl;
@@ -182,6 +183,8 @@ test('null or empty courseId means all courses', async () => {
 });
 
 test('unreachable Ollama returns 503 with the readable message', async () => {
+  // The embedding request is retried first; shorter delays keep the test fast
+  setRetryDelays({ baseMs: 1, rateLimitMs: 1 });
   fakeOllama.unreachable = true;
   try {
     const res = await ask({ question: 'Energy?' });
@@ -189,5 +192,19 @@ test('unreachable Ollama returns 503 with the readable message', async () => {
     assert.deepEqual(await res.json(), { error: 'Embedding service (Ollama) is not reachable.' });
   } finally {
     fakeOllama.unreachable = false;
+    setRetryDelays();
+  }
+});
+
+test('an embedding timeout returns 504 with the readable message', async () => {
+  process.env.EMBED_TIMEOUT_MS = '50';
+  fakeOllama.hang = true;
+  try {
+    const res = await ask({ question: 'Energy?' });
+    assert.equal(res.status, 504);
+    assert.match((await res.json()).error, /^The embedding service \(Ollama\) did not respond within .*EMBED_TIMEOUT_MS\.$/);
+  } finally {
+    fakeOllama.hang = false;
+    delete process.env.EMBED_TIMEOUT_MS;
   }
 });

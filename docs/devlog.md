@@ -1152,3 +1152,42 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch main, changed files: 2
 
 **My changes and outcome:** 
+
+### 29/10/2026, 20:21:37
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix findings R1, R2, R7, R13 and R17 from docs/code-review.md, plus the Retry-After part of R3.
+> 
+> - R1: add timeouts read from .env with defaults: EMBED_TIMEOUT_MS=60000, OPENAI_TIMEOUT_MS=300000, LOCAL_CHAT_TIMEOUT_MS=900000 (local models on this machine are slow, so the local timeout must be separate and longer). Map timeouts to readable errors.
+> - R2: retry embedding batches with the existing withRetries (network errors and 5xx).
+> - R3 (partial): respect Retry-After on 429 and use a longer backoff for rate limits. Do not add partial result storage.
+> - R7: in detectChapters, only move to the next method on "unusable result" errors; rethrow connection, auth, rate-limit and timeout errors, and never store a detection produced after such an error.
+> - R13: add a parseJson(value, fallback) helper for the chapters and outline columns.
+> - R17: make isContextError match only real context-length messages.
+> 
+> Add tests for each fix. Add the new variables to .env.example. Run npm test and npm run build.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> At the end list the changed files and new .env variables.
+> </pasted_content id="7e18">
+
+### 29/10/2026, 20:28:36
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>b3h8z8etg</task-id>
+> <tool-use-id>toolu_01Mtp1G2KQ9EBaDj6YSASR2B</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\b3h8z8etg.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Check Node fetch headers timeout (runs ~5 min)" completed (exit code 0)</summary>
+> </task-notification>
+
+**Summary:** Fixed review findings R1, R2, R7, R13, R17 and the Retry-After part of R3: added timeouts from .env (local replies now stream so the 900 s limit can work), embedding retries, Retry-After handling, rethrowing of infrastructure errors in chapter detection, a parseJson helper and a narrower context-error match, in server/llm.js, server/notes/chapters.js, server/db.js, server/jobs.js, server/index.js and .env.example. Added tests in tests/llm-reliability.test.js and updated the other tests and fakes; 219 of 219 tests pass and the build succeeds.
+
+**Type:** bugfix
+
+**Git:** branch fix/review-reliability, changed files: 15
+
+**My changes and outcome:** 

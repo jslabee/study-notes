@@ -2,6 +2,10 @@ import OpenAI from 'openai';
 
 const MAX_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
+// Rate limits back off longer (5, 10, 20 s) unless the response says when to retry; a wait
+// longer than MAX_RETRY_DELAY_MS is not worth it, so the error is reported instead
+const RATE_LIMIT_BASE_MS = 5000;
+const MAX_RETRY_DELAY_MS = 60000;
 
 export const PROVIDERS = ['auto', 'local', 'openai'];
 const LOCAL_MODELS_TTL_MS = 30000;
@@ -37,8 +41,27 @@ export function llmConfig() {
     localMaxOutputTokens: positiveInt('LOCAL_MAX_OUTPUT_TOKENS', 2048),
     openaiMaxOutputTokens: positiveInt('OPENAI_MAX_OUTPUT_TOKENS', 16000),
     openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT?.trim() || '',
+    // Time limits of one model call; local models can be slow, so theirs is separate and longer
+    openaiTimeoutMs: positiveInt('OPENAI_TIMEOUT_MS', 300000),
+    localChatTimeoutMs: positiveInt('LOCAL_CHAT_TIMEOUT_MS', 900000),
   };
 }
+
+// A model or embedding call that did not finish within its time limit; it is not retried,
+// because the limit is already long and a retry would only multiply the wait
+export class LlmTimeoutError extends LlmError {
+  constructor(message) {
+    super(504, message);
+  }
+}
+
+const seconds = (ms) => Math.round(ms / 1000);
+const openaiTimeoutMessage = (ms) =>
+  `OpenAI did not respond within ${seconds(ms)} s. Try again later, or increase OPENAI_TIMEOUT_MS.`;
+const localTimeoutMessage = (ms) =>
+  `The local model did not respond within ${seconds(ms)} s. Use a smaller model, or increase LOCAL_CHAT_TIMEOUT_MS.`;
+const embedTimeoutMessage = (ms) =>
+  `The embedding service (Ollama) did not respond within ${seconds(ms)} s. Check that Ollama is running, or increase EMBED_TIMEOUT_MS.`;
 
 const OUTPUT_TOKENS_CAP = 32000;
 export const OUTPUT_TOO_LONG_ERROR =
@@ -52,6 +75,13 @@ export const LOCAL_OUTPUT_TOO_LONG_ERROR =
 export class OutputLimitError extends LlmError {
   constructor(message = OUTPUT_TOO_LONG_ERROR) {
     super(422, message);
+  }
+}
+
+// The model answered with no text
+export class EmptyResponseError extends Error {
+  constructor() {
+    super('The model returned an empty response.');
   }
 }
 
@@ -292,15 +322,27 @@ function getLocalClient() {
   return localClient;
 }
 
-// Rate limits, timeouts, connection problems and server errors are worth retrying
+// Node's fetch waits at most 300 s for the response headers; the SDK then reports a timeout that
+// mentions them. Ollama sends the headers of a streamed reply with its first chunk.
+const NODE_HEADERS_TIMEOUT_MS = 300000;
+const waitedForHeaders = (err) => /response headers/i.test(err.message);
+
+// Rate limits, connection problems and server errors are worth retrying; timeouts are not (see
+// LlmTimeoutError)
 function isTransient(err) {
+  if (err instanceof OpenAI.APIConnectionTimeoutError) return false;
   if (err instanceof OpenAI.APIConnectionError) return true;
   if (!(err instanceof OpenAI.APIError)) return false;
   if (err.status === 429) return err.code !== 'insufficient_quota';
   return err.status === 408 || err.status === 409 || err.status >= 500;
 }
 
-function readableOpenaiError(err, model) {
+function readableOpenaiError(err, model, timeoutMs) {
+  if (err instanceof OpenAI.APIConnectionTimeoutError) {
+    // Node's fetch gives up waiting for the response headers after 300 s, even with a longer limit
+    const waited = waitedForHeaders(err) ? Math.min(timeoutMs, NODE_HEADERS_TIMEOUT_MS) : timeoutMs;
+    return new LlmTimeoutError(openaiTimeoutMessage(waited));
+  }
   if (err instanceof OpenAI.APIConnectionError) return new Error('Could not reach the OpenAI API.');
   if (!(err instanceof OpenAI.APIError)) return err;
   if (err.status === 401) return new Error('OpenAI rejected the API key. Check OPENAI_API_KEY.');
@@ -312,11 +354,26 @@ function readableOpenaiError(err, model) {
   return new Error(`OpenAI request failed: ${err.message}`);
 }
 
-// Ollama's errors when the request does not fit the model's context
-const isContextError = (err) => err instanceof OpenAI.APIError && /context|token/i.test(err.message);
+// Errors saying that the request does not fit the model's context, as Ollama (and OpenAI-style
+// servers) word them, e.g. "the input length exceeds the context length", "prompt too long;
+// exceeded max context length", "context_length_exceeded"; other errors that mention tokens
+// (e.g. "invalid token") are not context errors
+const CONTEXT_ERROR =
+  /context[ _](length|window|size)|context_length_exceeded|exceeds? (the )?(max(imum)? )?context|prompt (is )?too long|too many tokens/i;
+export const isContextError = (err) => err instanceof OpenAI.APIError && CONTEXT_ERROR.test(err.message);
 
-function readableLocalError(err, model) {
-  if (err instanceof OpenAI.APIConnectionError) return new Error(OLLAMA_UNREACHABLE_ERROR);
+// A streamed reply that stopped without a finish reason (the connection was closed); retried
+const LOCAL_REPLY_ENDED_ERROR = "The local model's reply ended before it was complete.";
+const LOCAL_FIRST_CHUNK_TIMEOUT_ERROR =
+  'The local model did not start answering within 300 s (the limit of Node.js). Use a smaller model or a smaller LOCAL_PART_CHARS.';
+
+function readableLocalError(err, model, timeoutMs) {
+  if (err instanceof OpenAI.APIConnectionTimeoutError) {
+    return new LlmTimeoutError(waitedForHeaders(err) ? LOCAL_FIRST_CHUNK_TIMEOUT_ERROR : localTimeoutMessage(timeoutMs));
+  }
+  if (err instanceof OpenAI.APIConnectionError) {
+    return new Error(err.message === LOCAL_REPLY_ENDED_ERROR ? err.message : OLLAMA_UNREACHABLE_ERROR);
+  }
   if (!(err instanceof OpenAI.APIError)) return err;
   if (isContextError(err)) return new LlmError(422, LOCAL_CONTEXT_ERROR);
   if (err.status === 404) return new Error(`Model "${model}" is not installed in Ollama.`);
@@ -325,17 +382,60 @@ function readableLocalError(err, model) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Base delays of withRetries; tests shorten them with setRetryDelays
+const DEFAULT_RETRY_DELAYS = { baseMs: RETRY_BASE_MS, rateLimitMs: RATE_LIMIT_BASE_MS };
+let retryDelays = { ...DEFAULT_RETRY_DELAYS };
+
+// Sets the base delays ({ baseMs, rateLimitMs }); without an argument restores the defaults (used
+// by tests)
+export function setRetryDelays(delays = DEFAULT_RETRY_DELAYS) {
+  retryDelays = { ...DEFAULT_RETRY_DELAYS, ...delays };
+}
+
+function header(headers, name) {
+  if (!headers) return null;
+  return typeof headers.get === 'function' ? headers.get(name) : (headers[name] ?? null);
+}
+
+// The wait a response asks for: retry-after-ms (milliseconds) or retry-after (seconds or an HTTP
+// date); null when there is none
+export function retryAfterMs(headers) {
+  const ms = Number.parseFloat(header(headers, 'retry-after-ms'));
+  if (Number.isFinite(ms) && ms >= 0) return ms;
+  const value = header(headers, 'retry-after');
+  if (value === null || value === undefined || value === '') return null;
+  const secondsValue = Number(value);
+  if (Number.isFinite(secondsValue) && secondsValue >= 0) return secondsValue * 1000;
+  const date = Date.parse(value);
+  return Number.isNaN(date) ? null : Math.max(0, date - Date.now());
+}
+
+// The delay before retry number attempt + 1, or null when waiting is not worth it. A rate limit
+// (429) waits as long as Retry-After asks, otherwise rateLimitDelayMs doubled per attempt; other
+// errors wait baseDelayMs doubled per attempt.
+export function retryDelayMs(
+  err,
+  attempt,
+  { baseDelayMs = retryDelays.baseMs, rateLimitDelayMs = retryDelays.rateLimitMs } = {}
+) {
+  if (err?.status !== 429) return baseDelayMs * 2 ** attempt;
+  const delay = retryAfterMs(err.headers) ?? rateLimitDelayMs * 2 ** attempt;
+  return delay <= MAX_RETRY_DELAY_MS ? delay : null;
+}
+
 // Runs fn, retrying up to MAX_RETRIES times with a growing delay on transient errors
 export async function withRetries(
   fn,
-  { retries = MAX_RETRIES, baseDelayMs = RETRY_BASE_MS, retryable = isTransient } = {}
+  { retries = MAX_RETRIES, baseDelayMs, rateLimitDelayMs, retryable = isTransient } = {}
 ) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
       if (attempt >= retries || !retryable(err)) throw err;
-      await sleep(baseDelayMs * 2 ** attempt);
+      const delay = retryDelayMs(err, attempt, { baseDelayMs, rateLimitDelayMs });
+      if (delay === null) throw err;
+      await sleep(delay);
     }
   }
 }
@@ -347,20 +447,23 @@ function logUsage(provider, model, { input, output, reasoning }, note = '') {
   console.log(`[llm] ${provider} ${model}: ${parts.join(', ')} tokens${note ? ` (${note})` : ''}`);
 }
 
-async function openaiRequest(openai, { model, system, user, maxOutputTokens, reasoningEffort }) {
+async function openaiRequest(openai, { model, system, user, maxOutputTokens, reasoningEffort, timeoutMs }) {
   let response;
   try {
     response = await withRetries(() =>
-      openai.responses.create({
-        model,
-        instructions: system,
-        input: user,
-        max_output_tokens: maxOutputTokens,
-        ...(reasoningEffort && { reasoning: { effort: reasoningEffort } }),
-      })
+      openai.responses.create(
+        {
+          model,
+          instructions: system,
+          input: user,
+          max_output_tokens: maxOutputTokens,
+          ...(reasoningEffort && { reasoning: { effort: reasoningEffort } }),
+        },
+        { timeout: timeoutMs }
+      )
     );
   } catch (err) {
-    throw readableOpenaiError(err, model);
+    throw readableOpenaiError(err, model, timeoutMs);
   }
 
   const usage = response.usage;
@@ -385,8 +488,8 @@ async function openaiRequest(openai, { model, system, user, maxOutputTokens, rea
 // cut off, OutputLimitError is thrown, so truncated text is never returned
 async function openaiChat({ model, system, user }) {
   const openai = getOpenaiClient();
-  const { openaiMaxOutputTokens, openaiReasoningEffort } = llmConfig();
-  const request = { model, system, user, reasoningEffort: openaiReasoningEffort };
+  const { openaiMaxOutputTokens, openaiReasoningEffort, openaiTimeoutMs } = llmConfig();
+  const request = { model, system, user, reasoningEffort: openaiReasoningEffort, timeoutMs: openaiTimeoutMs };
 
   let { response, cutOff } = await openaiRequest(openai, {
     ...request,
@@ -409,7 +512,7 @@ async function openaiChat({ model, system, user }) {
 // LOCAL_CONTEXT_TOKENS is not sent (callers split the text so that it fits). Every call logs the
 // estimated and reported prompt tokens, so the estimate can be compared with the real count.
 async function localChat({ model, system, user, purpose }) {
-  const { localMaxOutputTokens, localContextTokens } = llmConfig();
+  const { localMaxOutputTokens, localContextTokens, localChatTimeoutMs } = llmConfig();
   const estimated = estimateTokens(system) + estimateTokens(user);
   const fits = fitsLocalContext(system, user);
   const logCall = (fields) =>
@@ -424,42 +527,72 @@ async function localChat({ model, system, user, purpose }) {
   }
 
   const ollama = getLocalClient();
-  let response;
+  const request = {
+    model,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    max_tokens: localMaxOutputTokens,
+  };
+  let reply;
   try {
-    response = await withRetries(
-      () =>
-        ollama.chat.completions.create({
-          model,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-          max_tokens: localMaxOutputTokens,
-        }),
-      { retryable: (err) => !isContextError(err) && isTransient(err) }
-    );
+    reply = await withRetries(() => streamLocalChat(ollama, request, localChatTimeoutMs), {
+      retryable: (err) => !isContextError(err) && isTransient(err),
+    });
   } catch (err) {
-    throw readableLocalError(err, model);
+    throw readableLocalError(err, model, localChatTimeoutMs);
   }
 
-  const choice = response.choices?.[0];
-  const promptTokens = response.usage?.prompt_tokens;
-  const outputTokens = response.usage?.completion_tokens;
+  const promptTokens = reply.usage?.prompt_tokens;
+  const outputTokens = reply.usage?.completion_tokens;
   logCall(
     `reported prompt ${promptTokens ?? '?'}, output ${outputTokens ?? '?'} tokens, ` +
-      `finish ${choice?.finish_reason ?? '?'}`
+      `finish ${reply.finishReason}`
   );
   updateTokenRatio(system.length + user.length, promptTokens, localContextTokens);
 
   // "length" means the reply was cut off: by the output limit when it used all of it,
   // otherwise because Ollama's own context (OLLAMA_CONTEXT_LENGTH) ran out
-  if (choice?.finish_reason === 'length') {
+  if (reply.finishReason === 'length') {
     if (outputTokens === undefined || outputTokens >= localMaxOutputTokens) {
       throw new OutputLimitError(LOCAL_OUTPUT_TOO_LONG_ERROR);
     }
     throw new LlmError(422, LOCAL_CONTEXT_ERROR);
   }
-  return choice?.message?.content;
+  return reply.content;
+}
+
+// One local chat request with the reply streamed: Ollama sends the response headers of a reply
+// that is not streamed only when the whole reply is written, and Node's fetch stops waiting for
+// headers after 300 s, so a slower reply could never arrive. timeoutMs (LOCAL_CHAT_TIMEOUT_MS)
+// covers the whole call, until the last chunk. Returns { content, finishReason, usage }.
+async function streamLocalChat(ollama, request, timeoutMs) {
+  const signal = AbortSignal.timeout(timeoutMs);
+  let content = '';
+  let finishReason = null;
+  let usage = null;
+  try {
+    const stream = await ollama.chat.completions.create(
+      { ...request, stream: true, stream_options: { include_usage: true } },
+      { signal, timeout: timeoutMs }
+    );
+    for await (const chunk of stream) {
+      const choice = chunk.choices?.[0];
+      if (choice?.delta?.content) content += choice.delta.content;
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+      if (chunk.usage) usage = chunk.usage;
+    }
+  } catch (err) {
+    if (signal.aborted) throw new OpenAI.APIConnectionTimeoutError();
+    throw err;
+  }
+  // An abort while the reply is streamed ends the stream without an error
+  if (signal.aborted) throw new OpenAI.APIConnectionTimeoutError();
+  if (!finishReason) {
+    throw new OpenAI.APIConnectionError({ message: LOCAL_REPLY_ENDED_ERROR });
+  }
+  return { content, finishReason, usage };
 }
 
 // Sends a system instruction and a user message to the resolved provider and model;
@@ -473,7 +606,7 @@ export async function chat({ provider, model, system, user, maxOutputTokens, pur
     provider === 'local'
       ? await localChat({ model, system, user, purpose })
       : await openaiChat({ model, system, user, maxOutputTokens });
-  if (!text?.trim()) throw new Error('The model returned an empty response.');
+  if (!text?.trim()) throw new EmptyResponseError();
   return { text, provider, model };
 }
 
@@ -489,7 +622,56 @@ function embeddingConfig() {
   if (!Number.isInteger(dim) || dim <= 0) {
     throw new Error('Embedding size is not set. Set EMBED_DIM in .env.');
   }
-  return { url: url.replace(/\/+$/, ''), model, dim };
+  return {
+    url: url.replace(/\/+$/, ''),
+    model,
+    dim,
+    timeoutMs: positiveInt('EMBED_TIMEOUT_MS', 60000),
+  };
+}
+
+// A failed embedding request; transient ones (no connection, a server error from Ollama) are
+// retried
+class EmbedRequestError extends Error {
+  constructor(message, transient) {
+    super(message);
+    this.transient = transient;
+  }
+}
+
+const isTimeout = (err) => err?.name === 'TimeoutError';
+
+// One embedding request for a batch of texts; returns the embeddings from Ollama's reply
+async function embedBatch({ url, model, timeoutMs }, batch) {
+  // The time limit covers the whole request, including reading the reply
+  const signal = AbortSignal.timeout(timeoutMs);
+  let res;
+  try {
+    res = await fetch(`${url}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, input: batch }),
+      signal,
+    });
+  } catch (err) {
+    if (isTimeout(err)) throw new LlmTimeoutError(embedTimeoutMessage(timeoutMs));
+    throw new EmbedRequestError(EMBEDDING_UNREACHABLE_ERROR, true);
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new EmbedRequestError(
+      `Embedding request failed: ${body?.error || `status ${res.status}`}.`,
+      res.status >= 500
+    );
+  }
+
+  try {
+    return (await res.json()).embeddings;
+  } catch (err) {
+    if (isTimeout(err) || signal.aborted) throw new LlmTimeoutError(embedTimeoutMessage(timeoutMs));
+    throw new Error('The embedding service returned an unexpected response.');
+  }
 }
 
 // Scales a vector to length 1
@@ -499,31 +681,19 @@ export function normalize(vector) {
   return Float32Array.from(vector, (value) => value / length);
 }
 
-// Returns one normalized Float32Array per text, using Ollama with at most 32 texts per call
+// Returns one normalized Float32Array per text, using Ollama with at most 32 texts per call.
+// Each call has the time limit EMBED_TIMEOUT_MS; a call that fails because Ollama cannot be
+// reached or answers with a server error is retried up to three times with a growing delay.
 export async function embed(texts) {
-  const { url, model, dim } = embeddingConfig();
+  const config = embeddingConfig();
+  const { dim } = config;
   const vectors = [];
 
   for (let i = 0; i < texts.length; i += EMBED_BATCH_SIZE) {
     const batch = texts.slice(i, i + EMBED_BATCH_SIZE);
-
-    let res;
-    try {
-      res = await fetch(`${url}/api/embed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model, input: batch }),
-      });
-    } catch {
-      throw new Error(EMBEDDING_UNREACHABLE_ERROR);
-    }
-
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      throw new Error(`Embedding request failed: ${body?.error || `status ${res.status}`}.`);
-    }
-
-    const { embeddings } = await res.json();
+    const embeddings = await withRetries(() => embedBatch(config, batch), {
+      retryable: (err) => err instanceof EmbedRequestError && err.transient,
+    });
     if (!Array.isArray(embeddings) || embeddings.length !== batch.length) {
       throw new Error('The embedding service returned an unexpected response.');
     }

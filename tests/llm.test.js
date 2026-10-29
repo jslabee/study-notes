@@ -211,7 +211,8 @@ test('local chat goes to the OpenAI-compatible Ollama endpoint', async () => {
     maxOutputTokens: 4000,
   });
   assert.deepEqual(reply, { text: 'Local answer [1].', provider: 'local', model: 'gemma3:4b' });
-  // Local calls use LOCAL_MAX_OUTPUT_TOKENS (default 2048), not the caller's limit
+  // Local calls use LOCAL_MAX_OUTPUT_TOKENS (default 2048), not the caller's limit; the reply is
+  // streamed with the token usage at the end
   assert.deepEqual(fake.chatRequests, [
     {
       model: 'gemma3:4b',
@@ -220,6 +221,8 @@ test('local chat goes to the OpenAI-compatible Ollama endpoint', async () => {
         { role: 'user', content: 'Question?' },
       ],
       max_tokens: 2048,
+      stream: true,
+      stream_options: { include_usage: true },
     },
   ]);
 });

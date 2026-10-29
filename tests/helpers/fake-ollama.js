@@ -8,6 +8,48 @@ export function fakeVector(text, dim) {
   return vector;
 }
 
+// A request that never gets an answer: it fails like fetch does when its signal aborts
+export function hangUntilAborted(signal) {
+  return new Promise((_, reject) => {
+    const fail = () => reject(signal.reason ?? new DOMException('This operation was aborted', 'AbortError'));
+    if (signal?.aborted) fail();
+    else signal?.addEventListener('abort', fail, { once: true });
+  });
+}
+
+// A streamed chat reply as Ollama's OpenAI-compatible endpoint sends it (server-sent events): the
+// answer in two chunks, a chunk with the finish reason, a usage chunk (with include_usage), then
+// [DONE]. fake.stallAfterFirstChunk: the stream stops after the first chunk until the request is
+// aborted; fake.endWithoutFinish: the stream ends after the first chunk (a closed connection).
+function streamReply(fake, body, usage, signal) {
+  const base = { id: 'chatcmpl-test', object: 'chat.completion.chunk', created: 0, model: body.model };
+  const half = Math.ceil(fake.answer.length / 2);
+  const events = [
+    { ...base, choices: [{ index: 0, delta: { role: 'assistant', content: fake.answer.slice(0, half) }, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: { content: fake.answer.slice(half) }, finish_reason: null }] },
+    { ...base, choices: [{ index: 0, delta: {}, finish_reason: fake.finishReason ?? 'stop' }] },
+    ...(body.stream_options?.include_usage ? [{ ...base, choices: [], usage }] : []),
+  ].map((event) => `data: ${JSON.stringify(event)}\n\n`);
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(events[0]));
+      if (fake.endWithoutFinish) return controller.close();
+      if (fake.stallAfterFirstChunk) {
+        const fail = () => controller.error(signal.reason);
+        if (signal.aborted) fail();
+        else signal.addEventListener('abort', fail, { once: true });
+        return;
+      }
+      for (const event of events.slice(1)) controller.enqueue(encoder.encode(event));
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller.close();
+    },
+  });
+  return new Response(stream, { headers: { 'Content-Type': 'text/event-stream' } });
+}
+
 // models: [{ name, size, capabilities }]; without capabilities, /api/show has no such field
 export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer [1].' } = {}) {
   process.env.OLLAMA_URL = FAKE_URL;
@@ -15,11 +57,30 @@ export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer
   process.env.EMBED_DIM = String(dim);
 
   const realFetch = globalThis.fetch;
-  const fake = { calls: [], chatRequests: [], unreachable: false, returnDim: dim, models, answer };
+  // unreachableCalls counts requests made while unreachable; hang: requests never get an answer
+  // and fail only when their signal aborts (a timeout); embedErrors: HTTP statuses that the next
+  // embedding requests fail with, one per request
+  const fake = {
+    calls: [],
+    chatRequests: [],
+    unreachable: false,
+    unreachableCalls: 0,
+    hang: false,
+    embedErrors: [],
+    returnDim: dim,
+    models,
+    answer,
+  };
 
   globalThis.fetch = async (url, options = {}) => {
     if (!String(url).startsWith(FAKE_URL)) return realFetch(url, options);
-    if (fake.unreachable) throw new TypeError('fetch failed');
+    if (fake.unreachable) {
+      fake.unreachableCalls++;
+      throw new TypeError('fetch failed');
+    }
+    if (fake.hang) return hangUntilAborted(options.signal);
+    // fetchError: every request fails with this error, as fetch itself would fail
+    if (fake.fetchError) throw fake.fetchError;
     const { pathname } = new URL(String(url));
 
     if (pathname === '/api/tags') {
@@ -47,6 +108,14 @@ export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer
           { status: fake.chatError.status }
         );
       }
+      // Prompt tokens at fake.charsPerToken (default 4); output tokens from fake.outputTokens
+      const usage = {
+        prompt_tokens: Math.ceil(
+          body.messages.reduce((sum, m) => sum + m.content.length, 0) / (fake.charsPerToken ?? 4)
+        ),
+        completion_tokens: fake.outputTokens ?? 5,
+      };
+      if (body.stream) return streamReply(fake, body, usage, options.signal);
       return Response.json({
         id: 'chatcmpl-test',
         object: 'chat.completion',
@@ -59,16 +128,12 @@ export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer
             finish_reason: fake.finishReason ?? 'stop',
           },
         ],
-        // Prompt tokens at fake.charsPerToken (default 4); output tokens from fake.outputTokens
-        usage: {
-          prompt_tokens: Math.ceil(
-            body.messages.reduce((sum, m) => sum + m.content.length, 0) / (fake.charsPerToken ?? 4)
-          ),
-          completion_tokens: fake.outputTokens ?? 5,
-        },
+        usage,
       });
     }
 
+    const embedError = fake.embedErrors.shift();
+    if (embedError) return Response.json({ error: `fake error ${embedError}` }, { status: embedError });
     return Response.json({
       model: body.model,
       embeddings: body.input.map((text) => fakeVector(text, fake.returnDim)),
