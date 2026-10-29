@@ -11,7 +11,7 @@
 
 **Git:** branch main, changed files: 6
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Before this I installed Node.js, Git, VS Code with the Claude Code extension and Ollama with bge-m3 (tested the embedding endpoint), created .env with the OpenAI key (never committed) and the private GitHub repository jslabee/study-notes. Claude Code found the specification under the old name docs/Nacrt_razvoja_aplikacije.md.
 
 ### 23/10/2026, 17:09:20
 
@@ -25,7 +25,7 @@
 
 **Git:** branch main, changed files: 6
 
-**My changes and outcome:** 
+**My changes and outcome:** Partial. The file name and the system prompts were fixed. Flattened tables and missing code fences from the PDF export remained; I accepted them because Claude Code could still read the specification.
 
 ### 23/10/2026, 17:14:38
 
@@ -39,7 +39,7 @@
 
 **Git:** branch main, changed files: 10
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. npm test passed 3 of 3 and npm run build succeeded. Committed on feature/scaffold as "chore: scaffold study notes application".
 
 ### 23/10/2026, 17:21:13
 
@@ -53,7 +53,7 @@
 
 **Git:** branch main, changed files: 10
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Verification only: better-sqlite3 works on Windows without extra build tools.
 
 ### 23/10/2026, 18:24:58
 
@@ -92,7 +92,7 @@
 
 **Git:** branch feature/scaffold, changed files: 8
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Step 3a accepted; npm test passed 21 of 21.
 
 ### 23/10/2026, 18:37:13
 
@@ -117,7 +117,7 @@
 
 **Git:** branch feature/scaffold, changed files: 6
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Tested manually: creating a course, pasting text, uploading a TXT file, Processing changing to Ready, opening a material and deleting it.
 
 ### 23/10/2026, 18:59:50
 
@@ -160,7 +160,7 @@
 
 **Git:** branch feature/scaffold, changed files: 10
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Tested manually on a short material: generating and regenerating notes both worked.
 
 ### 23/10/2026, 21:41:24
 
@@ -213,7 +213,7 @@
 
 **Git:** branch feature/scaffold, changed files: 11
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Chunking and vector storage with bge-m3 work; tests and the build passed.
 
 ### 23/10/2026, 21:56:37
 
@@ -259,7 +259,7 @@
 
 **Git:** branch feature/scaffold, changed files: 12
 
-**My changes and outcome:** 
+**My changes and outcome:** Partial. Retrieval uses Ollama and answers use OpenAI; tests and the build passed, but I did not record a manual test of the Ask view.
 
 ### 23/10/2026, 22:45:01
 
@@ -331,7 +331,7 @@
 
 **Git:** branch feature/scaffold, changed files: 7
 
-**My changes and outcome:** 
+**My changes and outcome:** Partial. The evaluation scored 0 of 3 because titles with numeric prefixes (e.g. "2. Cell biology") did not match the expected titles; fixed in the next prompt.
 
 ### 23/10/2026, 22:59:54
 
@@ -355,7 +355,7 @@
 
 **Git:** branch feature/scaffold, changed files: 5
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Title matching now ignores leading numbering, case and whitespace; 77 tests passed, the build succeeded and the evaluation scored 3 of 3. Version 1.0 committed as "chore: finalize version 1.0".
 
 ### 23/10/2026, 23:01:49
 
@@ -369,7 +369,7 @@
 
 **Git:** branch feature/scaffold, changed files: 5
 
-**My changes and outcome:** 
+**My changes and outcome:** Failed. I typed git add . into Claude Code instead of the terminal; it only staged the files. Lesson: git commands go to the terminal.
 
 ### 28/10/2026, 13:51:32
 
@@ -459,7 +459,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch newUI, changed files: 14
 
-**My changes and outcome:** 
+**My changes and outcome:** PDF import: success. This prompt (the UI redesign) was sent too early, while the PDF import was still running, so the summary above belongs to the PDF import. I sent the redesign again at 14:19.
 
 ### 28/10/2026, 14:16:54
 
@@ -482,7 +482,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch newUI, changed files: 6
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Server-only change; the UI did not change in this step, as planned.
 
 ### 28/10/2026, 14:19:39
 
@@ -541,7 +541,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/ui-ux, changed files: 16
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. At first I did not see the new UI; after restarting the app it appeared and all point 8 functions worked.
 
 ### 29/10/2026, 11:16:43
 
@@ -607,7 +607,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/llm-provider, changed files: 27
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Before this step I set up Ollama on Windows: PowerShell instead of Git Bash, and an NVIDIA Studio driver update so the GPU is used. gemma3:4b runs fully on the 6 GB GPU; llama3.1:8b only partly.
 
 ### 29/10/2026, 11:41:03
 
@@ -658,7 +658,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/note-styles, changed files: 33
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Notes in different styles are stored separately per material.
 
 ### 29/10/2026, 17:42:51
 
@@ -709,7 +709,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 3
 
-**My changes and outcome:** 
+**My changes and outcome:** Popover fix (prompt at 17:42): success. The test-server notification is automatic, not my prompt.
 
 ### 29/10/2026, 17:49:41
 
@@ -756,7 +756,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 3
 
-**My changes and outcome:** 
+**My changes and outcome:** Dividers (prompt at 17:49): no bug in the code. The dividers existed only on unmerged branches (fix/local-context, fix/local-merge), and main was behind. Lesson: merge each branch before starting the next.
 
 ### 29/10/2026, 18:00:46
 
@@ -793,7 +793,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 3
 
-**My changes and outcome:** 
+**My changes and outcome:** The diagnosis was confirmed. A merge left in progress blocked switching branches, so I ran git reset --hard HEAD, merged fix/local-merge and redid the popover merge. I resolved a docs/devlog.md conflict with "Accept Both Changes". The reset also deleted uncommitted work on jumping to the cited passage.
 
 ### 29/10/2026, 11:55:40
 
@@ -837,7 +837,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/notes-layout, changed files: 14
 
-**My changes and outcome:** 
+**My changes and outcome:** Notes layout (prompt at 11:55): success. These entries appear out of time order because they came from another branch during a merge.
 
 ### 29/10/2026, 13:26:00
 
@@ -879,7 +879,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/local-context, changed files: 19
 
-**My changes and outcome:** 
+**My changes and outcome:** Partial. LOCAL_CONTEXT_TOKENS was missing from my .env at first. After adding it, merging with the local model still failed; continued in fix/local-merge.
 
 ### 29/10/2026, 13:35:55
 
@@ -912,7 +912,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/local-context, changed files: 8
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. The cause was reasoning tokens counting toward the output limit. I set OPENAI_MAX_OUTPUT_TOKENS=16000 and OPENAI_REASONING_EFFORT=low in .env.
 
 ### 29/10/2026, 15:15:38
 
@@ -955,7 +955,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/local-merge, changed files: 10
 
-**My changes and outcome:** 
+**My changes and outcome:** Claude Code ran a long check with the real model in the background, so the summary is in the next entry.
 
 ### 29/10/2026, 16:23:55
 
@@ -975,7 +975,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/local-merge, changed files: 10
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. The real cause was the output limit (2048 tokens), not the context. Local notes for the whole material now finish, but slowly.
 
 ### 29/10/2026, 16:51:45
 
@@ -1026,7 +1026,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/local-merge, changed files: 16
 
-**My changes and outcome:** 
+**My changes and outcome:** Progress and toolbar (prompt at 16:51): success. The progress bar shows the phase and steps; the toolbar no longer jumps when switching providers.
 
 ### 29/10/2026, 19:24:27
 
@@ -1082,7 +1082,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/chapter-notes, changed files: 1
 
-**My changes and outcome:** 
+**My changes and outcome:** Refused, correctly: my prompt named "Nadgradnja 7", but the section in the spec is "Nadgradnja 6", and page_offsets had been lost with the git reset.
 
 ### 29/10/2026, 19:26:35
 
@@ -1109,7 +1109,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/chapter-notes, changed files: 17
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. By-chapter notes work with all three detection methods.
 
 ### 29/10/2026, 19:51:11
 
@@ -1151,7 +1151,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 2
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. 33 findings, none critical. I also had OpenAI (ChatGPT) review the code: it found 6 findings, but it read an older version of the code and ran no tests. Both found the missing timeouts and the missing login; they disagreed on how serious the search filter problem is.
 
 ### 29/10/2026, 20:21:37
 
@@ -1190,7 +1190,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/review-reliability, changed files: 15
 
-**My changes and outcome:** 
+**My changes and outcome:** Review fixes R1, R2, R3, R7, R13, R17 (prompt at 20:21): success. Claude Code found that Node.js stops waiting for response headers after 300 s and asked how to proceed; I chose streaming for local replies. Added the new timeout variables to .env.
 
 ### 29/10/2026, 20:48:26
 
@@ -1212,7 +1212,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 7
 
-**My changes and outcome:** 
+**My changes and outcome:** R4 accepted. I later decided against the bind-address part of R5: the app must be reachable from all computers in the company network.
 
 ### 29/10/2026, 20:55:09
 
@@ -1234,7 +1234,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 8
 
-**My changes and outcome:** 
+**My changes and outcome:** Same prompt sent twice by mistake; the result is the same as above.
 
 ### 29/10/2026, 20:59:27
 
@@ -1257,7 +1257,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 6
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. The app listens on all interfaces again; access is limited by the company network instead of a login.
 
 ### 29/10/2026, 21:03:39
 
@@ -1281,7 +1281,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 8
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. README now matches the current app.
 
 ### 29/10/2026, 21:23:58
 
@@ -1310,7 +1310,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch fix/search-filter, changed files: 9
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. The existing database was migrated automatically on the next start, without reindexing. I updated docs/spec.md myself (Nadgradnja 7 and the notes after the code review).
 
 ### 29/10/2026, 21:41:41
 
@@ -1326,7 +1326,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 7
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. The window scrollbar is gone; only the panels scroll.
 
 ### 29/10/2026, 21:48:22
 
@@ -1351,7 +1351,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 12
 
-**My changes and outcome:** 
+**My changes and outcome:** Partial. Only the server part was done before the Claude usage limit was reached; continued after the reset.
 
 ### 29/10/2026, 22:51:51
 
@@ -1365,7 +1365,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch main, changed files: 15
 
-**My changes and outcome:** 
+**My changes and outcome:** Success. Opening a cited source scrolls to the highlighted passage and shows the PDF page again (this was lost with the earlier git reset).
 
 ### 29/10/2026, 23:58:30
 
@@ -1390,7 +1390,7 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 
 **Git:** branch feature/theme-setting, changed files: 8
 
-**My changes and outcome:** 
+**My changes and outcome:** Works, but it had three options (System, Light, Dark); I wanted only Light and Dark, so I simplified it in the next prompt.
 
 ### 30/10/2026, 00:11:43
 
