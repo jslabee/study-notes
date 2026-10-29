@@ -33,7 +33,24 @@ export function llmConfig() {
     openaiModel: process.env.OPENAI_MODEL || '',
     localMaxChars: positiveInt('LOCAL_MAX_CHARS', 60000),
     localPartChars: positiveInt('LOCAL_PART_CHARS', 15000),
+    localContextTokens: positiveInt('LOCAL_CONTEXT_TOKENS', 16384),
+    localMaxOutputTokens: positiveInt('LOCAL_MAX_OUTPUT_TOKENS', 2048),
   };
+}
+
+export const LOCAL_CONTEXT_ERROR =
+  "The material is too large for the local model's context. Use Auto or OpenAI, or increase LOCAL_CONTEXT_TOKENS and OLLAMA_CONTEXT_LENGTH.";
+const CONTEXT_SAFETY_MARGIN = 0.1;
+
+// A rough token count: about four characters per token
+export const estimateTokens = (text) => Math.ceil(text.length / 4);
+
+// Whether a local request fits LOCAL_CONTEXT_TOKENS: the estimated input (system prompt and user
+// message) plus LOCAL_MAX_OUTPUT_TOKENS, with a 10% safety margin
+export function fitsLocalContext(system, user) {
+  const { localContextTokens, localMaxOutputTokens } = llmConfig();
+  const tokens = estimateTokens(system) + estimateTokens(user) + localMaxOutputTokens;
+  return tokens * (1 + CONTEXT_SAFETY_MARGIN) <= localContextTokens;
 }
 
 // OPENAI_MODELS, or only OPENAI_MODEL when the list is empty; the default is always allowed
@@ -259,9 +276,13 @@ function readableOpenaiError(err, model) {
   return new Error(`OpenAI request failed: ${err.message}`);
 }
 
+// Ollama's errors when the request does not fit the model's context
+const isContextError = (err) => err instanceof OpenAI.APIError && /context|token/i.test(err.message);
+
 function readableLocalError(err, model) {
   if (err instanceof OpenAI.APIConnectionError) return new Error(OLLAMA_UNREACHABLE_ERROR);
   if (!(err instanceof OpenAI.APIError)) return err;
+  if (isContextError(err)) return new LlmError(422, LOCAL_CONTEXT_ERROR);
   if (err.status === 404) return new Error(`Model "${model}" is not installed in Ollama.`);
   return new Error(`Local model request failed: ${err.message}`);
 }
@@ -269,12 +290,15 @@ function readableLocalError(err, model) {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Runs fn, retrying up to MAX_RETRIES times with a growing delay on transient errors
-export async function withRetries(fn, { retries = MAX_RETRIES, baseDelayMs = RETRY_BASE_MS } = {}) {
+export async function withRetries(
+  fn,
+  { retries = MAX_RETRIES, baseDelayMs = RETRY_BASE_MS, retryable = isTransient } = {}
+) {
   for (let attempt = 0; ; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      if (attempt >= retries || !isTransient(err)) throw err;
+      if (attempt >= retries || !retryable(err)) throw err;
       await sleep(baseDelayMs * 2 ** attempt);
     }
   }
@@ -303,28 +327,34 @@ async function openaiChat({ model, system, user, maxOutputTokens }) {
   return response.output_text;
 }
 
-async function localChat({ model, system, user, maxOutputTokens }) {
+// Local calls always use LOCAL_MAX_OUTPUT_TOKENS, and a request that does not fit
+// LOCAL_CONTEXT_TOKENS is not sent (callers split the text so that it fits)
+async function localChat({ model, system, user }) {
+  const { localMaxOutputTokens } = llmConfig();
+  if (!fitsLocalContext(system, user)) throw new LlmError(422, LOCAL_CONTEXT_ERROR);
+
   const ollama = getLocalClient();
   let response;
   try {
-    response = await withRetries(() =>
-      ollama.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        max_tokens: maxOutputTokens,
-      })
+    response = await withRetries(
+      () =>
+        ollama.chat.completions.create({
+          model,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          max_tokens: localMaxOutputTokens,
+        }),
+      { retryable: (err) => !isContextError(err) && isTransient(err) }
     );
   } catch (err) {
     throw readableLocalError(err, model);
   }
 
+  // Ollama also stops here when its own context (OLLAMA_CONTEXT_LENGTH) runs out
   const choice = response.choices?.[0];
-  if (choice?.finish_reason === 'length') {
-    throw new Error('The model response was incomplete (max_output_tokens).');
-  }
+  if (choice?.finish_reason === 'length') throw new LlmError(422, LOCAL_CONTEXT_ERROR);
   return choice?.message?.content;
 }
 

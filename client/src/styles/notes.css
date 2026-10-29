@@ -139,6 +139,12 @@
   padding: var(--space-1) var(--space-2) var(--space-4);
 }
 
+/* A comfortable reading width, centered, however wide the panel is */
+.notes-tabpanel {
+  max-width: 80ch;
+  margin: 0 auto;
+}
+
 /* Markdown */
 .markdown {
   line-height: var(--line-height-body);

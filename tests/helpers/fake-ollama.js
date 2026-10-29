@@ -40,6 +40,13 @@ export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer
 
     if (pathname === '/v1/chat/completions') {
       fake.chatRequests.push(body);
+      // chatError: { status, message } makes the chat fail like Ollama does
+      if (fake.chatError) {
+        return Response.json(
+          { error: { message: fake.chatError.message, type: 'api_error' } },
+          { status: fake.chatError.status }
+        );
+      }
       return Response.json({
         id: 'chatcmpl-test',
         object: 'chat.completion',
@@ -49,7 +56,7 @@ export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer
           {
             index: 0,
             message: { role: 'assistant', content: fake.answer },
-            finish_reason: 'stop',
+            finish_reason: fake.finishReason ?? 'stop',
           },
         ],
       });

@@ -1,11 +1,21 @@
+import { useLayout } from '../layout.js'
 import { PROVIDER_LABELS, formatModelSize, useLlm } from '../llm.js'
+import { useToast } from '../toast.js'
 import ErrorState from './ErrorState.jsx'
 import Icon from './Icon.jsx'
 import Modal from './Modal.jsx'
 
-// Read-only view of the server's provider settings, with a button to reload the model lists
+// Read-only view of the server's provider settings, with a button to reload the model lists,
+// and the workspace layout reset
 function SettingsModal({ onClose }) {
   const { info, error, refreshing, refresh } = useLlm()
+  const { resetLayout } = useLayout()
+  const notify = useToast()
+
+  function handleResetLayout() {
+    resetLayout()
+    notify('The panel widths were reset.')
+  }
 
   const footer = (
     <button type="button" className="btn" onClick={refresh} disabled={refreshing}>
@@ -98,7 +108,18 @@ function SettingsModal({ onClose }) {
 
   return (
     <Modal title="Settings" onClose={onClose} footer={footer}>
-      {body}
+      <div className="stack">
+        {body}
+        <section className="settings-layout">
+          <div>
+            <h3 className="settings-heading">Layout</h3>
+            <p className="small muted">Panel widths are remembered in this browser.</p>
+          </div>
+          <button type="button" className="btn btn-small" onClick={handleResetLayout}>
+            Reset layout
+          </button>
+        </section>
+      </div>
     </Modal>
   )
 }

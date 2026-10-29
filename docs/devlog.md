@@ -659,3 +659,89 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch feature/note-styles, changed files: 33
 
 **My changes and outcome:** 
+
+### 29/10/2026, 11:55:40
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Make the Notes panel use more of the screen. Change only the client layout and
+> styles; do not change the API or behavior.
+> 
+> 1. Default widths of the three panels: Sources 20%, Chat 35%, Notes 45%.
+> 2. Add draggable dividers between the panels so the user can resize them with the
+>    mouse (and with the keyboard: arrow keys when a divider is focused). Minimum
+>    widths: Sources 200px, Chat 320px, Notes 360px.
+> 3. Remember the chosen widths per browser (localStorage) and add a "Reset layout"
+>    option in the settings panel.
+> 4. Add an "Expand" button in the Notes panel header that shows the notes across the
+>    full workspace width (Sources and Chat hidden), and a "Collapse" button to
+>    return. Esc also collapses.
+> 5. Inside the Notes panel keep a comfortable reading width: center the text with a
+>    maximum line width of about 80 characters even when the panel is wide.
+> 6. On narrow screens keep the existing tabs (Sources, Chat, Notes) unchanged.
+> 7. Run npm run build and check that resizing, expand/collapse and the saved layout
+>    work after a page reload.
+> </pasted_content id="7e18">
+
+### 29/10/2026, 12:00:35
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>bmtv7bzpu</task-id>
+> <tool-use-id>toolu_012VHcet5PFk95SF5xeHstPV</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\bmtv7bzpu.output</output-file>
+> <status>failed</status>
+> <summary>Background command "Run the app server on port 3999 with a database copy" failed with exit code 127</summary>
+> </task-notification>
+
+**Summary:** Made the workspace panels resizable (20/35/45% defaults, minimum widths, mouse and keyboard dividers, widths saved in localStorage, Reset layout in Settings), added Expand/Collapse with Esc for the Notes panel and an 80-character centered reading width. Changes are in client/src/layout.js, LayoutProvider.jsx, PanelDivider.jsx, Workspace.jsx, NotesPanel.jsx, Panel.jsx, SettingsModal.jsx, App.jsx, Icon.jsx and the workspace/notes/llm/tokens styles; checked in a browser with a headless Edge script.
+
+**Type:** implementation
+
+**Git:** branch feature/notes-layout, changed files: 14
+
+**My changes and outcome:** 
+
+### 29/10/2026, 13:26:00
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix "token limit exceeded" errors when generating notes for large materials with a
+> local model, following docs/spec.md, section "Nadgradnja 6". Change only
+> server/notes/ and server/llm.js.
+> 
+> 1. Read LOCAL_CONTEXT_TOKENS (default 16384) and LOCAL_MAX_OUTPUT_TOKENS (default
+>    2048) in server/llm.js. For local calls, set the maximum output tokens to
+>    LOCAL_MAX_OUTPUT_TOKENS. Do not add any fixed limits: every limit must come from
+>    these two values, so a powerful machine with a larger context works without code
+>    changes.
+> 2. Estimate tokens as characters / 4. Before every local call, check that the
+>    estimated input tokens (system prompt + user message) + LOCAL_MAX_OUTPUT_TOKENS
+>    + a 10% safety margin fit into LOCAL_CONTEXT_TOKENS. If not, split further
+>    instead of sending the request.
+> 3. Merging for local models: instead of fixed groups of 10, build groups so that
+>    each merge request fits the limit from step 2 (at least 2 items per group).
+>    Repeat merging level by level until one result remains. Keep groups of 10 for
+>    OpenAI.
+> 4. If a single part plus the prompt does not fit, split that part in half
+>    recursively at paragraph or sentence boundaries.
+> 5. If Ollama still returns a context or token error, set the notes status to error
+>    with the message: "The material is too large for the local model's context. Use
+>    Auto or OpenAI, or increase LOCAL_CONTEXT_TOKENS and OLLAMA_CONTEXT_LENGTH."
+> 6. Tests with the model mocked: with LOCAL_CONTEXT_TOKENS=16384 no request exceeds
+>    the limit; a large material (e.g. 40 long partial results) produces a valid
+>    multi-level merge; an oversized part is split; with LOCAL_CONTEXT_TOKENS=131072
+>    the same material needs fewer calls. Run npm test.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+**Summary:** Notes for the local model now stay within the context limit set by LOCAL_CONTEXT_TOKENS and LOCAL_MAX_OUTPUT_TOKENS: large parts are halved, merges are grouped by size level by level, and context errors give a clear message. The changes are in server/llm.js and server/notes/generate.js, with tests in tests/notes.test.js, tests/llm.test.js and tests/helpers/fake-ollama.js.
+
+**Type:** bugfix
+
+**Git:** branch fix/local-context, changed files: 19
+
+**My changes and outcome:** 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ask, deleteMaterial, getMaterial, getMaterials } from '../api.js'
+import { MIN_WIDTHS, useLayout } from '../layout.js'
 import { useLlm } from '../llm.js'
 import { useToast } from '../toast.js'
 import { useMediaQuery } from '../useMediaQuery.js'
@@ -7,6 +8,7 @@ import AddSourceModal from '../components/AddSourceModal.jsx'
 import ChatPanel from '../components/ChatPanel.jsx'
 import ConfirmDialog from '../components/ConfirmDialog.jsx'
 import NotesPanel from '../components/NotesPanel.jsx'
+import PanelDivider from '../components/PanelDivider.jsx'
 import SourcesPanel from '../components/SourcesPanel.jsx'
 import Tabs from '../components/Tabs.jsx'
 import SourceViewer from './SourceViewer.jsx'
@@ -21,6 +23,7 @@ const TABS_ID = 'workspace'
 function Workspace({ course }) {
   const notify = useToast()
   const { choice } = useLlm()
+  const { widths, setWidths } = useLayout()
   const narrow = useMediaQuery(NARROW_QUERY)
 
   const [materials, setMaterials] = useState(null)
@@ -39,6 +42,21 @@ function Workspace({ course }) {
 
   const [collapsed, setCollapsed] = useState({ sources: false, notes: false })
   const [tab, setTab] = useState('chat')
+  // Notes across the whole workspace width, with Sources and Chat hidden (wide screens only)
+  const [notesExpanded, setNotesExpanded] = useState(false)
+  const expanded = notesExpanded && !narrow
+
+  // Esc returns from expanded notes, unless it is closing a dialog
+  useEffect(() => {
+    if (!expanded) return
+    function handleKeyDown(event) {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (event.target.closest?.('dialog') || document.querySelector('dialog[open]')) return
+      setNotesExpanded(false)
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [expanded])
 
   const previousStatuses = useRef(null)
 
@@ -179,6 +197,7 @@ function Workspace({ course }) {
         },
       }
     }
+    if (expanded) return id === 'notes' ? {} : { hidden: true }
     if (!side) return {}
     return {
       collapsed: collapsed[id],
@@ -186,15 +205,33 @@ function Workspace({ course }) {
     }
   }
 
+  // Wide screens: panels at their saved shares (but at least their minimum width), with
+  // dividers between them; a collapsed panel is a narrow rail and cannot be resized
+  const track = (id) =>
+    collapsed[id]
+      ? 'var(--panel-collapsed-width)'
+      : `minmax(${MIN_WIDTHS[id]}px, ${widths[id] * 100}fr)`
+  let gridStyle
+  if (expanded) gridStyle = { gridTemplateColumns: 'minmax(0, 1fr)' }
+  else if (!narrow) {
+    gridStyle = {
+      gridTemplateColumns: [track('sources'), 'var(--space-4)', track('chat'), 'var(--space-4)', track('notes')].join(' '),
+    }
+  }
+
+  function divider(left, right, label) {
+    if (narrow || expanded) return null
+    if (collapsed[left] || collapsed[right]) return <div className="panel-gap" aria-hidden="true" />
+    return (
+      <PanelDivider left={left} right={right} label={label} widths={widths} onResize={setWidths} />
+    )
+  }
+
   const readyTitles = (materials ?? [])
     .filter((m) => m.status === 'ready' && isChecked(m.id))
     .map((m) => m.title)
 
-  const layoutClass = narrow
-    ? 'workspace-narrow'
-    : [collapsed.sources && 'sources-collapsed', collapsed.notes && 'notes-collapsed']
-        .filter(Boolean)
-        .join(' ')
+  const layoutClass = narrow ? 'workspace-narrow' : expanded ? 'notes-expanded' : ''
 
   return (
     <>
@@ -213,7 +250,7 @@ function Workspace({ course }) {
             className="workspace-tabs"
           />
         )}
-        <div className="workspace-panels">
+        <div className="workspace-panels" style={gridStyle}>
           <SourcesPanel
             materials={materials}
             error={loadError}
@@ -231,6 +268,7 @@ function Workspace({ course }) {
             onAdd={() => setAdding(true)}
             panelProps={panelProps('sources', 'left')}
           />
+          {divider('sources', 'chat', 'Resize Sources and Chat panels')}
           <ChatPanel
             messages={messages}
             searching={searching}
@@ -243,10 +281,13 @@ function Workspace({ course }) {
             readyTitles={readyTitles}
             panelProps={panelProps('chat')}
           />
+          {divider('chat', 'notes', 'Resize Chat and Notes panels')}
           <NotesPanel
             key={notesMaterial?.id ?? 'none'}
             material={notesMaterial}
             onOpenSource={setViewingId}
+            expanded={expanded}
+            onToggleExpand={narrow ? undefined : () => setNotesExpanded((current) => !current)}
             panelProps={panelProps('notes', 'right')}
           />
         </div>

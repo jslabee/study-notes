@@ -8,22 +8,47 @@
 
 .workspace-panels {
   display: grid;
-  grid-template-columns: var(--panel-left-width) minmax(0, 1fr) var(--panel-right-width);
-  gap: var(--space-4);
+  /* On wide screens the columns (panels and dividers) are set by the Workspace */
   flex: 1;
   min-height: 0;
 }
 
-.workspace.sources-collapsed .workspace-panels {
-  grid-template-columns: var(--panel-collapsed-width) minmax(0, 1fr) var(--panel-right-width);
+/* Draggable boundary between two panels; the gap between panels is its hit area */
+.panel-divider {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
 }
 
-.workspace.notes-collapsed .workspace-panels {
-  grid-template-columns: var(--panel-left-width) minmax(0, 1fr) var(--panel-collapsed-width);
+.panel-divider::after {
+  content: '';
+  position: absolute;
+  inset: var(--space-4) 50%;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  transition: background-color 0.15s;
 }
 
-.workspace.sources-collapsed.notes-collapsed .workspace-panels {
-  grid-template-columns: var(--panel-collapsed-width) minmax(0, 1fr) var(--panel-collapsed-width);
+.panel-divider:hover::after,
+.panel-divider:focus-visible::after,
+.resizing .panel-divider::after {
+  background: var(--color-accent);
+}
+
+.panel-divider:focus-visible {
+  outline: none;
+}
+
+.panel-divider:focus-visible::after {
+  width: 4px;
+  margin-left: -2px;
+}
+
+.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .workspace-narrow {
@@ -32,6 +57,7 @@
 
 .workspace-narrow .workspace-panels {
   grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
 }
 
 .workspace-tabs {

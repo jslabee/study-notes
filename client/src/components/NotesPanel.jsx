@@ -96,7 +96,7 @@ function TabStatus({ status }) {
 
 // Notes of the material selected in the Sources panel, one tab per generated style;
 // the Workspace renders it with key={id}
-function NotesPanel({ material, onOpenSource, panelProps }) {
+function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, panelProps }) {
   const notify = useToast()
   const { choice } = useLlm()
   const materialId = material?.id
@@ -310,7 +310,27 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
   }
 
   return (
-    <Panel title="Notes" icon="notes" side="right" className="panel-notes" {...panelProps}>
+    <Panel
+      title="Notes"
+      icon="notes"
+      side="right"
+      className="panel-notes"
+      headerActions={
+        onToggleExpand && (
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onToggleExpand}
+            aria-label={expanded ? 'Collapse notes' : 'Expand notes'}
+            aria-pressed={expanded}
+            title={expanded ? 'Collapse (Esc)' : 'Expand to the full width'}
+          >
+            <Icon name={expanded ? 'collapse' : 'expand'} size={16} />
+          </button>
+        )
+      }
+      {...panelProps}
+    >
       {material && (
         <div className="notes-source">
           <button

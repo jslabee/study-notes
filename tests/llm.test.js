@@ -211,6 +211,7 @@ test('local chat goes to the OpenAI-compatible Ollama endpoint', async () => {
     maxOutputTokens: 4000,
   });
   assert.deepEqual(reply, { text: 'Local answer [1].', provider: 'local', model: 'gemma3:4b' });
+  // Local calls use LOCAL_MAX_OUTPUT_TOKENS (default 2048), not the caller's limit
   assert.deepEqual(fake.chatRequests, [
     {
       model: 'gemma3:4b',
@@ -218,10 +219,90 @@ test('local chat goes to the OpenAI-compatible Ollama endpoint', async () => {
         { role: 'system', content: 'System.' },
         { role: 'user', content: 'Question?' },
       ],
-      max_tokens: 4000,
+      max_tokens: 2048,
     },
   ]);
 });
+
+const LOCAL_CONTEXT = /too large for the local model's context.*LOCAL_CONTEXT_TOKENS and OLLAMA_CONTEXT_LENGTH/;
+
+function withLocalTokens(context, output, fn) {
+  return async () => {
+    if (context) process.env.LOCAL_CONTEXT_TOKENS = String(context);
+    if (output) process.env.LOCAL_MAX_OUTPUT_TOKENS = String(output);
+    fake.chatRequests.length = 0;
+    try {
+      await fn();
+    } finally {
+      delete process.env.LOCAL_CONTEXT_TOKENS;
+      delete process.env.LOCAL_MAX_OUTPUT_TOKENS;
+      delete fake.chatError;
+      delete fake.finishReason;
+    }
+  };
+}
+
+test('the local context defaults to 16384 tokens with 2048 output tokens', () => {
+  const config = llm.llmConfig();
+  assert.equal(config.localContextTokens, 16384);
+  assert.equal(config.localMaxOutputTokens, 2048);
+  assert.equal(llm.estimateTokens('a'.repeat(400)), 100);
+  assert.equal(llm.estimateTokens('abcde'), 2);
+});
+
+test(
+  'a request fits when input + output tokens + 10% fit into LOCAL_CONTEXT_TOKENS',
+  withLocalTokens(11000, 1000, () => {
+    // (input + 1000) * 1.1 <= 11000 allows about 9000 input tokens (36,000 characters)
+    assert.ok(llm.fitsLocalContext('a'.repeat(4000), 'b'.repeat(31800)));
+    assert.ok(!llm.fitsLocalContext('a'.repeat(4000), 'b'.repeat(32200)));
+  })
+);
+
+test(
+  'LOCAL_MAX_OUTPUT_TOKENS sets max_tokens for local calls',
+  withLocalTokens(65536, 8192, async () => {
+    await llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U', maxOutputTokens: 4000 });
+    assert.equal(fake.chatRequests[0].max_tokens, 8192);
+  })
+);
+
+test(
+  'a local request that does not fit the context is not sent',
+  withLocalTokens(4096, 1024, async () => {
+    await rejectsWith(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'x'.repeat(12000) }),
+      422,
+      LOCAL_CONTEXT
+    );
+    assert.equal(fake.chatRequests.length, 0);
+  })
+);
+
+test(
+  'a context error from Ollama gives the local context message and is not retried',
+  withLocalTokens(null, null, async () => {
+    fake.chatError = { status: 500, message: 'the input length exceeds the context length' };
+    await rejectsWith(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
+      422,
+      LOCAL_CONTEXT
+    );
+    assert.equal(fake.chatRequests.length, 1);
+  })
+);
+
+test(
+  'a reply cut off by the token limit gives the local context message',
+  withLocalTokens(null, null, async () => {
+    fake.finishReason = 'length';
+    await rejectsWith(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
+      422,
+      LOCAL_CONTEXT
+    );
+  })
+);
 
 test('OpenAI chat returns the provider and model used', async () => {
   fakeOpenAI.requests.length = 0;

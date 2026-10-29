@@ -2,12 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import OpenAI from 'openai';
-import { withRetries } from '../server/llm.js';
+import { LOCAL_CONTEXT_ERROR, withRetries } from '../server/llm.js';
 import {
   GROUP_SIZE,
   MAX_PART_CHARS,
   generateNotes,
   reduceNotes,
+  reduceNotesToFit,
+  splitInHalf,
   splitText,
 } from '../server/notes/generate.js';
 import {
@@ -174,6 +176,163 @@ test('the OpenAI provider keeps parts of 60,000 characters', async () => {
   const content = makeText(MAX_PART_CHARS);
   await generateNotes({ title: 'Book', content }, { provider: 'openai', model: 'gpt-5-mini', chat });
   assert.equal(calls.filter((c) => c.system === NOTES_SYSTEM_PROMPT).length, 2);
+});
+
+// The context check from the specification, computed here independently of server/llm.js:
+// (system + user characters) / 4 + output tokens, plus 10%, must fit the context
+const fitsContext = (call, context, output = 2048) =>
+  (Math.ceil(call.system.length / 4) + Math.ceil(call.user.length / 4) + output) * 1.1 <= context;
+
+// Runs fn with the local context settings, then restores the defaults
+async function withLocalSettings({ context, partChars = 15000 }, fn) {
+  process.env.LOCAL_CONTEXT_TOKENS = String(context);
+  process.env.LOCAL_PART_CHARS = String(partChars);
+  try {
+    return await fn();
+  } finally {
+    delete process.env.LOCAL_CONTEXT_TOKENS;
+    process.env.LOCAL_PART_CHARS = '15000';
+  }
+}
+
+// Mock for a local model with long replies (about replyChars characters); each reply starts
+// with the part numbers it covers, so the merge tree can be checked
+function longReplyChat(replyChars) {
+  const calls = [];
+  const chat = async (request) => {
+    calls.push(request);
+    const covers =
+      request.system === NOTES_SYSTEM_PROMPT
+        ? [request.user.match(/This is part (\d+) of/)?.[1] ?? '1']
+        : [...request.user.matchAll(/^covers: (.*)$/gm)].flatMap((m) => m[1].split(','));
+    const head = `covers: ${covers.join(',')}\n`;
+    return { text: head + 'x'.repeat(Math.max(0, replyChars - head.length)) };
+  };
+  return { calls, chat };
+}
+
+const coveredParts = (notes) => notes.match(/^covers: (.*)$/m)[1].split(',').map(Number);
+const notesInMerge = (call) => call.user.match(/<notes part="/g).length;
+const BOOK = makeText(40 * 15000);
+
+async function generateBook(context, content = BOOK, partChars = 15000) {
+  return withLocalSettings({ context, partChars }, async () => {
+    const { calls, chat } = longReplyChat(6000);
+    const result = await generateNotes(
+      { title: 'Big book', content },
+      { provider: 'local', model: 'gemma3:4b', chat }
+    );
+    return { calls, result };
+  });
+}
+
+test('local, 16384 tokens: 40 long partial results are merged in levels that all fit', async () => {
+  const partCount = splitText(BOOK, 15000).length;
+  assert.ok(partCount >= 40);
+  const { calls, result } = await generateBook(16384);
+
+  for (const call of calls) {
+    assert.ok(fitsContext(call, 16384), `a request of ${call.user.length} characters is too large`);
+    assert.equal(call.maxOutputTokens, 2048);
+  }
+  const partCalls = calls.filter((c) => c.system === NOTES_SYSTEM_PROMPT);
+  const mergeCalls = calls.filter((c) => c.system === MERGE_SYSTEM_PROMPT);
+  assert.equal(partCalls.length, partCount);
+  assert.equal(partCalls.length + mergeCalls.length, calls.length);
+
+  // Every merge has at least two notes, and some merges combine earlier merges (more levels)
+  for (const call of mergeCalls) assert.ok(notesInMerge(call) >= 2);
+  assert.ok(mergeCalls.length > 2);
+  assert.ok(mergeCalls.some((call) => /^covers: \d+,\d+/m.test(call.user)));
+
+  // The final merge covers every part exactly once, in order
+  assert.deepEqual(coveredParts(result), Array.from({ length: partCount }, (_, i) => i + 1));
+  assert.equal(calls.at(-1).system, MERGE_SYSTEM_PROMPT);
+});
+
+test('local, 131072 tokens: the same material needs fewer calls', async () => {
+  const small = await generateBook(16384);
+  const large = await generateBook(131072);
+
+  for (const call of large.calls) assert.ok(fitsContext(call, 131072));
+  const largeMerges = large.calls.filter((c) => c.system === MERGE_SYSTEM_PROMPT);
+  assert.equal(largeMerges.length, 1);
+  assert.ok(large.calls.length < small.calls.length);
+  assert.deepEqual(coveredParts(large.result), coveredParts(small.result));
+});
+
+test('local: a part that does not fit with its prompt is halved until it fits', async () => {
+  const content = makeText(150000);
+  // LOCAL_PART_CHARS is larger than the material, so it starts as one part
+  assert.equal(splitText(content, 200000).length, 1);
+  const { calls } = await generateBook(16384, content, 200000);
+
+  const partCalls = calls.filter((c) => c.system === NOTES_SYSTEM_PROMPT);
+  assert.ok(partCalls.length >= 3);
+  for (const call of calls) assert.ok(fitsContext(call, 16384));
+
+  // Parts are cut at paragraph ends, numbered, and lose no words
+  const materials = partCalls.map((call, i) => {
+    assert.ok(call.user.includes(`This is part ${i + 1} of ${partCalls.length}.\n`));
+    return call.user.match(/<material>\n([\s\S]*)\n<\/material>/)[1];
+  });
+  for (const material of materials) {
+    assert.match(material, /^Paragraph \d+\./);
+    assert.match(material, /\.$/);
+  }
+  assert.deepEqual(words(materials.join(' ')), words(content));
+
+  // With a large context the same part is sent whole
+  const large = await generateBook(131072, content, 200000);
+  assert.equal(large.calls.length, 1);
+});
+
+test('splitInHalf cuts near the middle at a paragraph, else a sentence, else a space', () => {
+  assert.deepEqual(splitInHalf('One one.\n\nTwo two.\n\nThree.\n\nFour four.'), [
+    'One one.\n\nTwo two.',
+    'Three.\n\nFour four.',
+  ]);
+  assert.deepEqual(splitInHalf('First part here. Second part here.'), ['First part here.', 'Second part here.']);
+  assert.deepEqual(splitInHalf('aaaa bbbb'), ['aaaa', 'bbbb']);
+});
+
+test('local merge groups have at least two notes; a single note moves to the next level', async () => {
+  const groups = [];
+  // At most three notes fit in one merge
+  const result = await reduceNotesToFit(
+    ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+    async (group) => {
+      groups.push(group.join(''));
+      return `(${group.join('')})`;
+    },
+    (group) => group.length <= 3
+  );
+  assert.deepEqual(groups, ['abc', 'def', '(abc)(def)g']);
+  assert.equal(result, '((abc)(def)g)');
+});
+
+test('local: when not even two notes fit in a merge, the context message is given', async () => {
+  await assert.rejects(
+    reduceNotesToFit(['a', 'b'], async () => assert.fail('no merge is sent'), () => false),
+    { message: LOCAL_CONTEXT_ERROR }
+  );
+});
+
+test('local: when the prompt alone does not fit, no request is sent', async () => {
+  process.env.LOCAL_MAX_OUTPUT_TOKENS = '1000';
+  try {
+    await withLocalSettings({ context: 1000 }, () =>
+      assert.rejects(
+        generateNotes(
+          { title: 'Cells', content: 'Cells are small.' },
+          { provider: 'local', model: 'gemma3:4b', chat: async () => assert.fail('no call') }
+        ),
+        { message: LOCAL_CONTEXT_ERROR }
+      )
+    );
+  } finally {
+    delete process.env.LOCAL_MAX_OUTPUT_TOKENS;
+  }
 });
 
 test('prompts match the specification verbatim', () => {

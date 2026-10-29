@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getHealth } from './api.js'
+import LayoutProvider from './components/LayoutProvider.jsx'
 import LlmProvider from './components/LlmProvider.jsx'
 import SettingsModal from './components/SettingsModal.jsx'
 import ToastProvider from './components/ToastProvider.jsx'
@@ -22,16 +23,18 @@ function App() {
   return (
     <ToastProvider>
       <LlmProvider>
-        <div className="app">
-          <TopBar
-            courseName={course?.name}
-            onHome={() => setCourse(null)}
-            serverOnline={serverOnline}
-            onOpenSettings={() => setSettingsOpen(true)}
-          />
-          {course ? <Workspace key={course.id} course={course} /> : <Home onOpenCourse={setCourse} />}
-        </div>
-        {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+        <LayoutProvider>
+          <div className="app">
+            <TopBar
+              courseName={course?.name}
+              onHome={() => setCourse(null)}
+              serverOnline={serverOnline}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+            {course ? <Workspace key={course.id} course={course} /> : <Home onOpenCourse={setCourse} />}
+          </div>
+          {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+        </LayoutProvider>
       </LlmProvider>
     </ToastProvider>
   )
