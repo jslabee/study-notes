@@ -5,6 +5,20 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Study Notes</title>
+    <script>
+      // Applies the stored theme (or, on the first visit, the operating system's theme) before
+      // the first render, so the page never flashes in the wrong theme; same rules as src/theme.js
+      ;(function () {
+        var choice = null
+        try {
+          choice = localStorage.getItem('study-notes.theme')
+        } catch (e) {}
+        if (choice !== 'light' && choice !== 'dark') {
+          choice = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+        }
+        document.documentElement.dataset.theme = choice
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
