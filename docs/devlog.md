@@ -659,3 +659,138 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch feature/note-styles, changed files: 33
 
 **My changes and outcome:** 
+
+### 29/10/2026, 17:42:51
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix the citation popover in the Chat panel (the window that opens when clicking a
+> numbered citation chip in an answer). Currently its background is transparent and
+> long text overflows outside the window. Change only the popover component and its
+> styles in client/.
+> 
+> 1. Background and readability: use a solid background from the design tokens (the
+>    same surface color as cards), a visible border, a shadow and enough padding.
+>    Text must be readable in both light and dark theme.
+> 2. Size: width min(420px, 90vw); maximum height about 50% of the viewport; when the
+>    excerpt is longer, scroll inside the popover (overflow-y: auto) instead of
+>    overflowing. Wrap long words and URLs (overflow-wrap: anywhere).
+> 3. Layering: the popover must appear above all panels and dividers (sufficient
+>    z-index; render it in a portal at the document body if needed so panel overflow
+>    does not clip it).
+> 4. Position: open next to the clicked chip, but keep it fully inside the viewport;
+>    flip above the chip when there is no room below and shift horizontally near the
+>    edges.
+> 5. Structure: title (source name) at the top, the excerpt below, the "Open source"
+>    link at the bottom; a close button in the corner.
+> 6. Closing: Esc, clicking outside, or clicking the same chip again closes it; focus
+>    returns to the chip.
+> 7. Run npm run build and check with a long excerpt, a chip near the right edge and
+>    near the bottom of the window, in light and dark theme.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+### 29/10/2026, 17:46:50
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>bawfl126a</task-id>
+> <tool-use-id>toolu_01RLjKx39imotPsWkRttgCmC</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\bawfl126a.output</output-file>
+> <status>failed</status>
+> <summary>Background command "Start the app server on a test port" failed with exit code 127</summary>
+> </task-notification>
+
+**Summary:** Fixed the citation popover: solid card background with a visible border and shadow in both themes, width min(420px, 90vw) and at most 50% of the window with the excerpt scrolling inside and long words wrapping, rendered on the page body above all panels, placed beside the chip within the window (flips above, shifts at the edges), with a title, close button and Open source link; Esc, outside click or the chip close it and focus returns to the chip. Changed client/src/components/CitationChip.jsx and client/src/styles/overlays.css.
+
+**Type:** bugfix
+
+**Git:** branch main, changed files: 3
+
+**My changes and outcome:** 
+
+### 29/10/2026, 17:49:41
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Regression: after the citation popover fix, the draggable dividers between the
+> Sources, Chat and Notes panels no longer work (panels cannot be resized), and the
+> Notes "Expand" mode must keep working too. Find the cause and fix it without undoing
+> the popover improvements (solid background, size limits, scrolling, viewport
+> positioning, z-index, closing with Esc and outside click).
+> 
+> 1. Check first whether the popover (or a full-screen overlay/backdrop, a portal
+>    container, a global mousedown/pointerdown/click listener, preventDefault or
+>    stopPropagation) intercepts pointer events or covers the dividers, also when the
+>    popover is closed. Explain the cause in your summary.
+> 2. Make sure nothing from the popover is rendered or listening when it is closed,
+>    the outside-click handler never calls preventDefault and only closes the popover,
+>    and any overlay uses pointer-events: none except the popover box itself.
+> 3. Make sure the dividers have a z-index and pointer handling that the popover
+>    portal does not override.
+> 4. Run npm run build and check: resizing all dividers with the mouse and the
+>    keyboard, saved widths after reload, Notes Expand/Collapse, and the citation
+>    popover (open, scroll, Esc, outside click) — both while the popover is closed
+>    and right after closing it.
+> Change only the popover and panel layout components and their styles.
+> </pasted_content id="7e18">
+
+### 29/10/2026, 17:51:57
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>bctad1s3j</task-id>
+> <tool-use-id>toolu_01RVFqDtkxWPauNHycYphPBJ</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\bctad1s3j.output</output-file>
+> <status>failed</status>
+> <summary>Background command "Start the scratch copy of fix/local-merge on a test port" failed with exit code 127</summary>
+> </task-notification>
+
+**Summary:** The dividers did not break because of the popover: the working tree is on main, which never contained the layout commit d23fc45 (dividers, saved widths, Notes Expand); the popover renders and listens only while open and never prevents pointer events. With the two popover files applied to a scratch copy of fix/local-merge, all divider, keyboard, reload, Expand/Collapse and popover checks passed; no code was changed.
+
+**Type:** bugfix
+
+**Git:** branch main, changed files: 3
+
+**My changes and outcome:** 
+
+### 29/10/2026, 18:00:46
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Panel resizing (dragging the dividers between Sources, Chat and Notes) worked at
+> commit be9d316 ("Merge feature/note-styles") and is broken now. I tested in the
+> browser.
+> 
+> 1. Run: git log --oneline be9d316..HEAD and git diff be9d316 -- client/
+>    Since then the client changed in: the notes progress / notes toolbar layout fix
+>    and the citation popover fix. List every change that can affect the dividers:
+>    global event listeners, preventDefault/stopPropagation, pointer-events,
+>    overlays/backdrops, portals, z-index, position, overflow, flex/grid sizing,
+>    min-width/width rules, and any change to the panel, divider or toolbar
+>    components or their CSS.
+> 2. Identify the exact change that breaks dragging and explain it in your summary.
+> 3. Fix it with the smallest possible change. Keep the popover improvements (solid
+>    background, size limits, scrolling, viewport positioning) and the stable notes
+>    toolbar layout. If a portal or global listener breaks it, attach the
+>    outside-click listener only while the popover is open, use 'click' (not
+>    'mousedown'/'pointerdown'), never call preventDefault, and remove it on close.
+>    If a toolbar min-width or flex rule prevents the panels from resizing, change
+>    that rule instead of the dividers.
+> 4. Do not rewrite the divider and panel components; if they changed since
+>    be9d316 and that caused the bug, restore only the broken part.
+> 5. Run npm run build and list the exact manual checks I should do.
+> </pasted_content id="7e18">
+
+**Summary:** Diagnosed the reported divider regression: be9d316 (the current HEAD on main) never contained dividers, and they exist only in commit d23fc45 on fix/local-context and fix/local-merge. The only client change since be9d316 is the popover fix, whose portal and listeners exist only while it is open and never block pointer events, so no code was changed; listed the changes, how to combine the branches and the manual checks.
+
+**Type:** question
+
+**Git:** branch main, changed files: 3
+
+**My changes and outcome:** 

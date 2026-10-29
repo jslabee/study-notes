@@ -154,25 +154,40 @@
   visibility: visible;
 }
 
-/* Citation popover */
+/* Citation popover: a card above all panels, next to its chip; a long excerpt scrolls inside */
 .citation-popover {
   position: fixed;
-  z-index: 30;
-  display: grid;
-  gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: min(420px, 90vw);
+  max-height: 50vh;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border-strong);
   border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: var(--shadow-lg);
+  color: var(--color-text);
   font-size: var(--font-size-sm);
   line-height: var(--line-height-body);
+  overflow-wrap: anywhere;
+}
+
+.citation-popover:focus {
+  outline: none;
+}
+
+.citation-popover:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 .citation-popover-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
+  flex: none;
 }
 
 .citation-popover-number {
@@ -181,6 +196,7 @@
   flex: none;
   min-width: 20px;
   height: 20px;
+  margin-top: 1px;
   border-radius: var(--radius-pill);
   background: var(--color-accent);
   color: var(--color-on-accent);
@@ -189,20 +205,31 @@
 }
 
 .citation-popover-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pulled into the padding, so the title row keeps its height */
+.citation-popover-close {
+  width: 28px;
+  height: 28px;
+  margin: -4px -6px 0 0;
 }
 
 .citation-popover-excerpt {
-  max-height: 220px;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
   overflow-y: auto;
   color: var(--color-text-muted);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
-.citation-popover .link-btn {
-  justify-self: start;
+.citation-popover-footer {
+  flex: none;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
 }
 
 /* Toasts */
