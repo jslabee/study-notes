@@ -14,6 +14,7 @@ const { getDb, closeDb } = await import('../server/db.js');
 const { whenIdle } = await import('../server/jobs.js');
 const { indexMaterial } = await import('../server/rag/index.js');
 const { chunkText } = await import('../server/rag/chunk.js');
+const { setRetryDelays } = await import('../server/llm.js');
 
 let server;
 let baseUrl;
@@ -109,7 +110,10 @@ test('deleting a material removes its chunks and vectors but not those of others
 });
 
 test('unreachable Ollama sets status error with the exact message', async () => {
+  // The embedding request is retried first; shorter delays keep the test fast
+  setRetryDelays({ baseMs: 1, rateLimitMs: 1 });
   fake.unreachable = true;
+  fake.unreachableCalls = 0;
   try {
     const id = await uploadText('Offline', 'Some text about cells.');
     await whenIdle();
@@ -117,8 +121,26 @@ test('unreachable Ollama sets status error with the exact message', async () => 
     assert.equal(material.status, 'error');
     assert.equal(material.error, 'Embedding service (Ollama) is not reachable.');
     assert.equal(material.chunkCount, 0);
+    assert.equal(fake.unreachableCalls, 4);
   } finally {
     fake.unreachable = false;
+    setRetryDelays();
+  }
+});
+
+test('a transient Ollama error during indexing is retried and the material becomes ready', async () => {
+  setRetryDelays({ baseMs: 1, rateLimitMs: 1 });
+  fake.embedErrors = [500];
+  try {
+    const id = await uploadText('Retried', longText);
+    await whenIdle();
+    const material = await (await fetch(`${baseUrl}/api/materials/${id}`)).json();
+    assert.equal(material.status, 'ready');
+    assert.equal(material.chunkCount, chunkText(longText).length);
+    assert.deepEqual(fake.embedErrors, []);
+  } finally {
+    fake.embedErrors = [];
+    setRetryDelays();
   }
 });
 

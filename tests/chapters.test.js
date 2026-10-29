@@ -16,7 +16,10 @@ const fakeOllama = installFakeOllama({ dim: 8 });
 const fakeOpenAI = installFakeOpenAI();
 
 const { app } = await import('../server/index.js');
-const { getDb, closeDb } = await import('../server/db.js');
+const { getDb, closeDb, parseJson } = await import('../server/db.js');
+const { EmptyResponseError, LOCAL_CONTEXT_ERROR, LlmError, LlmTimeoutError, OutputLimitError } = await import(
+  '../server/llm.js'
+);
 const { whenIdle } = await import('../server/jobs.js');
 const { outlineToChapters, pdfToTextWithPages } = await import('../server/materials/convert.js');
 const chapters = await import('../server/notes/chapters.js');
@@ -561,4 +564,164 @@ test('the API stores the detected chapters; Detect again detects them anew', asy
     name: 'By chapter',
     description: 'Overview and a summary of each chapter or section (books, long scripts, lectures)',
   });
+});
+
+// --- Errors during detection ---
+
+test('connection, auth, rate-limit and timeout errors are thrown instead of trying the next method', async () => {
+  const errors = [
+    new Error('Could not reach the OpenAI API.'),
+    new Error('OpenAI rejected the API key. Check OPENAI_API_KEY.'),
+    new Error('OpenAI rate limit reached. Try again later.'),
+    new LlmTimeoutError('OpenAI did not respond within 300 s. Try again later, or increase OPENAI_TIMEOUT_MS.'),
+  ];
+  for (const error of errors) {
+    let chunksLoaded = false;
+    const logs = [];
+    await assert.rejects(
+      detectChapters(
+        { title: 'Biology', content: modelText, outline: null },
+        {
+          complete: async () => {
+            throw error;
+          },
+          fits: fitsAll,
+          chunks: () => {
+            chunksLoaded = true;
+            return lectureChunks;
+          },
+          log: (line) => logs.push(line),
+        }
+      ),
+      (err) => err === error
+    );
+    // Topic segmentation was not tried, so no weaker detection could be returned
+    assert.equal(chunksLoaded, false, error.message);
+    assert.deepEqual(logs, []);
+  }
+});
+
+test('unusable results (empty, cut off, too large for the context) move on to the next method', async () => {
+  const errors = [new EmptyResponseError(), new OutputLimitError(), new LlmError(422, LOCAL_CONTEXT_ERROR)];
+  for (const error of errors) {
+    const titles = ['Cell Basics', 'Plant Energy', 'Growth of Organisms'];
+    let candidateCalls = 0;
+    const logs = [];
+    const result = await detectChapters(
+      { title: 'Lecture', content: lecture, outline: null },
+      {
+        complete: async (phase, system) => {
+          if (system !== CANDIDATES_PROMPT) return titles.shift();
+          candidateCalls++;
+          throw error;
+        },
+        fits: fitsAll,
+        chunks: () => lectureChunks,
+        log: (line) => logs.push(line),
+      }
+    );
+    assert.equal(candidateCalls, 1);
+    assert.equal(result.method, 'topics', error.message);
+    assert.deepEqual(logs, [`[chapters] model failed: ${error.message}`]);
+  }
+});
+
+test('a connection error during detection fails the job and stores no detection', async () => {
+  const form = new FormData();
+  form.append('courseId', courseId);
+  form.append('title', 'Plain text book');
+  form.append('text', modelText);
+  const { id } = await (await fetch(`${baseUrl}/api/materials`, { method: 'POST', body: form })).json();
+  await whenIdle();
+
+  // The first OpenAI request (the candidate lines) is rejected; any later request would succeed,
+  // so a detection that went on to topic segmentation would be stored
+  fakeOpenAI.answer = 'A title';
+  fakeOpenAI.errors.push({ status: 401, message: 'Incorrect API key provided' });
+  const res = await fetch(`${baseUrl}/api/materials/${id}/notes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ style: 'by-chapter', provider: 'openai' }),
+  });
+  assert.equal(res.status, 202);
+  await whenIdle();
+
+  const notes = await (await fetch(`${baseUrl}/api/materials/${id}/notes/by-chapter`)).json();
+  assert.equal(notes.status, 'error');
+  assert.equal(notes.error, 'OpenAI rejected the API key. Check OPENAI_API_KEY.');
+  assert.ok(!('chapters' in notes));
+  const row = getDb().prepare("SELECT chapters FROM notes WHERE material_id = ? AND style = 'by-chapter'").get(id);
+  assert.equal(row.chapters, null);
+  assert.equal(fakeOpenAI.errors.length, 0);
+});
+
+// --- Stored JSON that cannot be read ---
+
+test('parseJson returns the fallback for empty or invalid JSON', () => {
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (line) => warnings.push(line);
+  try {
+    assert.deepEqual(parseJson('{"method":"model","chapters":[]}', null), { method: 'model', chapters: [] });
+    assert.deepEqual(parseJson('[1,2]', []), [1, 2]);
+    assert.equal(parseJson(null, 'fallback'), 'fallback');
+    assert.equal(parseJson(undefined, 'fallback'), 'fallback');
+    assert.equal(parseJson('', 'fallback'), 'fallback');
+    assert.equal(warnings.length, 0);
+    assert.deepEqual(parseJson('{"method":', []), []);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /^\[db\] Ignoring a stored value that is not valid JSON: /);
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test('invalid stored chapters or outline do not break the notes API or the job', async () => {
+  const form = new FormData();
+  form.append('courseId', courseId);
+  form.append('title', 'Broken JSON book');
+  form.append('file', new Blob([buildPdf(bookPages, { outline: bookOutline })]), 'book.pdf');
+  const { id } = await (await fetch(`${baseUrl}/api/materials`, { method: 'POST', body: form })).json();
+  await whenIdle();
+
+  const db = getDb();
+  db.prepare(
+    "INSERT INTO notes (material_id, style, status, content, chapters) VALUES (?, 'by-chapter', 'ready', '## Old', ?)"
+  ).run(id, '{"method":"model","chapters":[');
+  db.prepare("INSERT INTO notes (material_id, style, status, content) VALUES (?, 'brief', 'ready', '## Brief')").run(id);
+
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    // A detection that cannot be read is left out; the other styles are listed as before
+    const res = await fetch(`${baseUrl}/api/materials/${id}/notes`);
+    assert.equal(res.status, 200);
+    const list = await res.json();
+    assert.deepEqual(list.map((n) => n.style), ['brief', 'by-chapter']);
+    assert.ok(!('chapters' in list[1]));
+    // Valid JSON of the wrong shape is left out as well
+    db.prepare("UPDATE notes SET chapters = '{\"method\":\"model\"}' WHERE material_id = ? AND style = 'by-chapter'").run(id);
+    assert.ok(!('chapters' in (await (await fetch(`${baseUrl}/api/materials/${id}/notes/by-chapter`)).json())));
+
+    // The job detects the chapters again: with an unreadable outline, from the model (the reply is
+    // not JSON) and then topic segmentation, or by parts
+    db.prepare("UPDATE notes SET chapters = 'not json' WHERE material_id = ? AND style = 'by-chapter'").run(id);
+    db.prepare("UPDATE materials SET outline = '[{\"title\":' WHERE id = ?").run(id);
+    fakeOpenAI.answer = '## Notes';
+    await fetch(`${baseUrl}/api/materials/${id}/notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ style: 'by-chapter', provider: 'openai' }),
+    });
+    await whenIdle();
+    const notes = await (await fetch(`${baseUrl}/api/materials/${id}/notes/by-chapter`)).json();
+    assert.equal(notes.status, 'ready', notes.error);
+    assert.notEqual(notes.chapters?.method, 'outline');
+    const stored = JSON.parse(
+      db.prepare("SELECT chapters FROM notes WHERE material_id = ? AND style = 'by-chapter'").get(id).chapters
+    );
+    assert.ok(Array.isArray(stored.chapters));
+  } finally {
+    console.warn = warn;
+  }
 });

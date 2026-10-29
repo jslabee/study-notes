@@ -6,6 +6,7 @@
 //   topics   topic segmentation at the largest similarity drops between consecutive chunk
 //            vectors; the model gives each section a short title
 import { getDb } from '../db.js';
+import { EmptyResponseError, LOCAL_CONTEXT_ERROR, LlmError, OutputLimitError } from '../llm.js';
 import { CANDIDATES_PROMPT, SECTION_TITLE_PROMPT } from './styles.js';
 
 export const MIN_CHAPTER_WORDS = 300;
@@ -273,11 +274,25 @@ async function titleSections({ title, content }, sections, { complete, fits }) {
   return titled;
 }
 
+// Errors that mean a method's result cannot be used, so the next method is tried: a reply that
+// is not the expected JSON, an empty reply, a reply cut off by the output limit, or a request
+// too large for the local model's context
+export function isUnusableResult(err) {
+  return (
+    err instanceof InvalidReplyError ||
+    err instanceof EmptyResponseError ||
+    err instanceof OutputLimitError ||
+    (err instanceof LlmError && err.message === LOCAL_CONTEXT_ERROR)
+  );
+}
+
 // Detects the chapters of a material with the first method whose result is valid:
 // { method: 'outline' | 'model' | 'topics', chapters: [{ title, start }] }, or { method: null,
 // chapters: [] } when no method finds any. complete(phase, system, user, purpose) calls the
 // model, fits(system, user) tells whether a request fits the chosen provider, and
 // chunks() returns the material's chunks with their vectors.
+// Any other error (no connection, a rejected key, a rate limit, a timeout) is thrown, so the
+// job fails and no weaker detection is returned (and stored) because of a passing problem.
 export async function detectChapters(material, { complete, fits, chunks = () => [], log = console.log }) {
   const methods = {
     outline: async () => fromOutline(material.outline),
@@ -289,7 +304,7 @@ export async function detectChapters(material, { complete, fits, chunks = () => 
     try {
       found = validateChapters(material.content, await methods[method]());
     } catch (err) {
-      // A reply that cannot be used (e.g. invalid JSON) means the next method is tried
+      if (!isUnusableResult(err)) throw err;
       log(`[chapters] ${method} failed: ${err.message}`);
       continue;
     }

@@ -1,4 +1,4 @@
-import { getDb } from './db.js';
+import { getDb, parseJson } from './db.js';
 import { resolveLlm } from './llm.js';
 import { generateNotes } from './notes/generate.js';
 import { indexMaterial } from './rag/index.js';
@@ -57,13 +57,21 @@ const handlers = {
       (used ? `${used.provider}:${used.model}` : 'no model');
     try {
       used = llm ?? (await resolveLlm({ textLength: row.content.length }));
-      const material = { id: row.id, title: row.title, content: row.content, outline: JSON.parse(row.outline) };
+      // A stored outline or detection that cannot be read counts as none
+      const outline = parseJson(row.outline, null);
+      const stored = parseJson(row.chapters, null);
+      const material = {
+        id: row.id,
+        title: row.title,
+        content: row.content,
+        outline: Array.isArray(outline) ? outline : null,
+      };
       const content = await generateNotes(material, {
         style: row.style,
         ...used,
         onProgress: ({ chapter = null, ...state }) => Object.assign(progress, state, { chapter }),
         // by-chapter: chapters detected before are used again, new ones are stored at once
-        detection: JSON.parse(row.chapters),
+        detection: Array.isArray(stored?.chapters) ? stored : null,
         onChapters: (detection) =>
           getDb().prepare('UPDATE notes SET chapters = ? WHERE id = ?').run(JSON.stringify(detection), notesId),
       });
