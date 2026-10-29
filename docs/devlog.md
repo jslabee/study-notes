@@ -1110,3 +1110,45 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch feature/chapter-notes, changed files: 17
 
 **My changes and outcome:** 
+
+### 29/10/2026, 19:51:11
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Do a full code review of the whole project. Do not change any code. Write the
+> results to docs/code-review.md (you may create this file).
+> 
+> Check against CLAUDE.md and docs/spec.md, and cover:
+> 1. Correctness: bugs, unhandled edge cases, inconsistencies with the spec
+>    (API, database schema, prompts copied verbatim, provider/model rules, note
+>    styles, chapter detection, PDF import, background jobs).
+> 2. Security: input validation on every API route, file upload limits and types,
+>    SQL injection, path handling, XSS in rendered Markdown and source text, API
+>    keys or secrets in code or logs, error messages that leak internals, CORS.
+> 3. Data consistency: deleting materials removes notes, chunks and vectors;
+>    migrations keep data; transactions where several writes belong together;
+>    behavior after a server restart during processing.
+> 4. Reliability: error handling and retries for OpenAI and Ollama, timeouts,
+>    context and output token limits, behavior when Ollama is not running.
+> 5. Performance: large materials (800-page book), memory use, blocking the event
+>    loop, polling frequency, unnecessary model calls.
+> 6. Frontend: state handling, loading/error/empty states, accessibility, layout
+>    regressions (dividers, popovers, toolbar), leftover dead code.
+> 7. Code quality: duplicated code, unclear names, very long functions, files in
+>    the wrong place, unused dependencies, comments.
+> 8. Tests: what is covered, important gaps, tests that do not test anything real.
+> 9. Run npm test, npm run build and npm audit and include the results.
+> 
+> Format of docs/code-review.md: a short summary, then a table of findings with
+> columns: ID, severity (critical / major / minor), area, file:line, problem,
+> suggested fix. Sort by severity. End with a list of the 5 most important fixes.
+> </pasted_content id="7e18">
+
+**Summary:** Did a full code review of the project against CLAUDE.md and docs/spec.md and wrote it to docs/code-review.md, covering correctness, security, data consistency, reliability, performance, frontend, code quality and tests. It includes the npm test, build, audit and lint results, a findings table sorted by severity and the 5 most important fixes; no code was changed.
+
+**Type:** documentation
+
+**Git:** branch main, changed files: 2
+
+**My changes and outcome:** 
