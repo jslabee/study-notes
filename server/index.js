@@ -243,18 +243,21 @@ app.post('/api/materials/:id/notes', async (req, res) => {
     .prepare('SELECT status FROM notes WHERE material_id = ? AND style = ?')
     .get(materialId, style);
   if (existing?.status !== 'processing') {
-    // Resolved here, so an invalid or unavailable choice is reported before anything changes
+    // Resolved here, so an invalid or unavailable choice is reported before anything changes. The
+    // resolved provider and model are stored, so a job restored after a restart uses them too.
     const llm = await resolveLlm({ ...choice, textLength: material.length });
     const { id } = db
       .prepare(
-        `INSERT INTO notes (material_id, style) VALUES (?, ?)
+        `INSERT INTO notes (material_id, style, requested_provider, requested_model) VALUES (?, ?, ?, ?)
          ON CONFLICT (material_id, style) DO UPDATE SET
            content = NULL, model = NULL, status = 'processing', error = NULL,
            chapters = CASE WHEN ? THEN NULL ELSE chapters END,
+           requested_provider = excluded.requested_provider,
+           requested_model = excluded.requested_model,
            created_at = CURRENT_TIMESTAMP
          RETURNING id`
       )
-      .get(materialId, style, redetect ? 1 : 0);
+      .get(materialId, style, llm.provider, llm.model, redetect ? 1 : 0);
     enqueue('notes', id, llm);
   }
   res.status(202).json({ style, status: 'processing' });
@@ -338,11 +341,24 @@ app.use((err, req, res, next) => {
   });
 });
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Opens the database, queues the jobs that were still processing and starts listening on PORT;
+// resolves with the server once it listens, and rejects when it cannot (e.g. the port is in use)
+export function startServer({ port = process.env.PORT } = {}) {
   getDb();
   restoreJobs();
-  const port = process.env.PORT;
-  app.listen(port, () => {
-    console.log(`Server listening on port ${port}`);
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port);
+    server.once('listening', () => {
+      console.log(`Server listening on port ${server.address().port}`);
+      resolve(server);
+    });
+    server.once('error', reject);
+  });
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  startServer().catch((err) => {
+    console.error(`Server could not start: ${err.message}`);
+    process.exitCode = 1;
   });
 }

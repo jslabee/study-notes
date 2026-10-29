@@ -1191,3 +1191,94 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch fix/review-reliability, changed files: 15
 
 **My changes and outcome:** 
+
+### 29/10/2026, 20:48:26
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix findings R4 and the bind-address part of R5 from docs/code-review.md.
+> 
+> - R4: store the requested provider and model in the notes row (migration that keeps existing data) and use them in restoreJobs. If the stored choice is no longer available, fail with a clear error, never fall back to another provider.
+> - R5: bind to process.env.HOST with default 127.0.0.1 (keep it configurable, a Docker container will later need 0.0.0.0). Do not add Origin checks.
+> 
+> Add tests for both fixes. Add HOST to .env.example. Run npm test and npm run build.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** Fixed review findings R4 and the bind-address part of R5: notes now store the resolved provider and model (migration in server/db.js, stored by server/index.js), restored jobs in server/jobs.js re-check that choice and fail clearly instead of falling back, and the server listens on HOST with default 127.0.0.1 (server/index.js, .env.example). Added tests/restore-jobs.test.js and tests/server-host.test.js; all 233 tests pass and the build succeeds.
+
+**Type:** bugfix
+
+**Git:** branch main, changed files: 7
+
+**My changes and outcome:** 
+
+### 29/10/2026, 20:55:09
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix findings R4 and the bind-address part of R5 from docs/code-review.md.
+> 
+> - R4: store the requested provider and model in the notes row (migration that keeps existing data) and use them in restoreJobs. If the stored choice is no longer available, fail with a clear error, never fall back to another provider.
+> - R5: bind to process.env.HOST with default 127.0.0.1 (keep it configurable, a Docker container will later need 0.0.0.0). Do not add Origin checks.
+> 
+> Add tests for both fixes. Add HOST to .env.example. Run npm test and npm run build.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** Fixed R4 by storing the resolved provider and model with each notes row (migration adds requested_provider and requested_model) and making restored jobs use exactly that choice or fail with a clear error, never falling back; fixed the bind-address part of R5 with a HOST variable defaulting to 127.0.0.1 and an exported startServer(), in server/db.js, server/index.js, server/jobs.js and .env.example. Added tests in tests/restore-llm.test.js, tests/server-host.test.js and tests/db-migration.test.js; 231 of 231 tests pass and the build succeeds.
+
+**Type:** bugfix
+
+**Git:** branch main, changed files: 8
+
+**My changes and outcome:** 
+
+### 29/10/2026, 20:59:27
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Revert the R5 change only. Keep all R4 changes.
+> 
+> - The server must listen on all network interfaces again, as before (app.listen(port) without a host). Remove the HOST variable from the code and from .env.example.
+> - Remove tests/server-host.test.js and any other test that checks HOST or 127.0.0.1.
+> - Keep the clear error for a port that is already in use if it does not need HOST.
+> 
+> Run npm test and npm run build.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** Reverted the R5 bind-address change: the server listens on all interfaces again (app.listen(port)), HOST is removed from server/index.js and .env.example, and tests/server-host.test.js is deleted, while startServer() keeps the clear error for a port in use. All R4 changes are kept; 227 of 227 tests pass and the build succeeds.
+
+**Type:** bugfix
+
+**Git:** branch main, changed files: 6
+
+**My changes and outcome:** 
+
+### 29/10/2026, 21:03:39
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix finding R11 and the README part of R25 from docs/code-review.md. Update README.md so it describes the app as it is now:
+> 
+> - Features: TXT, SRT, VTT and PDF import; source selection; local models through Ollama and OpenAI with the provider and model picker; note styles including by-chapter notes and "Detect again"; chat with citations.
+> - Installation and configuration: list every variable from .env.example with a short explanation and the recommended value, including the Ollama models to pull (bge-m3 and a local chat model such as gemma3:4b) and OLLAMA_CONTEXT_LENGTH matching LOCAL_CONTEXT_TOKENS.
+> - Usage: how to upload, select sources, choose the provider and model, generate notes in each style, and ask questions.
+> - Limitations: the app has no login and is meant only for a trusted internal company network, not the public internet; local models are slow on long materials; stop the server before running npm run reindex.
+> 
+> Also make the reindex script print a warning to stop the server first.
+> Keep the README in English. Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** Fixed R11 and the README part of R25: README.md now covers the current features, all .env.example variables with recommended values, Ollama setup (bge-m3, gemma3:4b, OLLAMA_CONTEXT_LENGTH), usage and limitations, and server/rag/reindex.js warns to stop the server first. All 227 tests pass and the build succeeds.
+
+**Type:** documentation
+
+**Git:** branch main, changed files: 8
+
+**My changes and outcome:** 

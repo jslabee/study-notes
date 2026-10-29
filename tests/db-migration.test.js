@@ -64,6 +64,7 @@ const db = getDb();
 const notesBefore = db
   .prepare('SELECT id, material_id, style, content, model, status, error FROM notes ORDER BY id')
   .all();
+const requestedBefore = db.prepare('SELECT requested_provider, requested_model FROM notes ORDER BY id').all();
 
 after(() => {
   closeDb();
@@ -110,6 +111,67 @@ test('existing notes are kept as style study-notes and styles are unique per mat
   ]);
   const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'notes'").get();
   assert.match(sql, /UNIQUE \(material_id, style\)/);
+  // Rebuilt notes have no requested provider or model yet
+  assert.deepEqual(requestedBefore, [{ requested_provider: null, requested_model: null }]);
+});
+
+// A database as created before the requested provider and model were stored
+const BEFORE_REQUESTED_LLM_SCHEMA = `
+CREATE TABLE courses (id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE materials (
+  id INTEGER PRIMARY KEY,
+  course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  type TEXT NOT NULL CHECK (type IN ('text','txt','srt','vtt','pdf')),
+  content TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','ready','error')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  page_offsets TEXT,
+  outline TEXT
+);
+CREATE TABLE notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  style TEXT NOT NULL DEFAULT 'study-notes',
+  content TEXT,
+  model TEXT,
+  status TEXT NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','ready','error')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  chapters TEXT,
+  UNIQUE (material_id, style)
+);
+INSERT INTO courses (id, name) VALUES (1, 'Biology');
+INSERT INTO materials (id, course_id, title, type, content, status) VALUES (4, 1, 'Cells', 'txt', 'Cells.', 'ready');
+INSERT INTO notes (id, material_id, style, content, model, status, created_at, chapters) VALUES
+  (2, 4, 'by-chapter', '## Overview', 'local:gemma3:4b', 'ready', '2026-10-01 09:00:00', '{"method":null,"chapters":[]}'),
+  (5, 4, 'brief', NULL, NULL, 'processing', '2026-10-02 09:00:00', NULL);
+`;
+
+test('the requested provider and model columns are added to existing notes, keeping their data', () => {
+  closeDb();
+  const previousPath = process.env.DB_PATH;
+  process.env.DB_PATH = path.join(tmpDir, 'before-requested-llm.db');
+  const raw = new Database(process.env.DB_PATH);
+  raw.exec(BEFORE_REQUESTED_LLM_SCHEMA);
+  const rowsBefore = raw.prepare('SELECT * FROM notes ORDER BY id').all();
+  raw.close();
+
+  try {
+    const migrated = getDb();
+    assert.deepEqual(
+      migrated.prepare('SELECT * FROM notes ORDER BY id').all(),
+      rowsBefore.map((row) => ({ ...row, requested_provider: null, requested_model: null }))
+    );
+    // Opening it again changes nothing
+    closeDb();
+    assert.equal(getDb().prepare('SELECT count(*) AS n FROM notes').get().n, 2);
+  } finally {
+    closeDb();
+    process.env.DB_PATH = previousPath;
+  }
 });
 
 test('opening an already migrated database changes nothing', () => {

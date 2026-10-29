@@ -30,6 +30,8 @@ const NOTES_COLUMNS = `
   error TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   chapters TEXT,                    -- by-chapter: JSON { method, chapters: [{ title, start }] }
+  requested_provider TEXT,          -- provider (local | openai) and model resolved for the last
+  requested_model TEXT,             -- request; a job restored after a restart uses exactly these
   UNIQUE (material_id, style)
 `;
 
@@ -67,6 +69,7 @@ export function getDb() {
   migrateMaterialsType(db);
   migrateNotesStyle(db);
   migrateChapterColumns(db);
+  migrateRequestedLlmColumns(db);
   // one vector per chunk; rowid = chunks.id
   db.exec(
     `CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(embedding float[${embedDim}]);`
@@ -121,13 +124,23 @@ function migrateNotesStyle(db) {
 // detected chapters. The columns are added empty: PDFs imported before have no pages or outline,
 // so chapter detection skips the PDF outline for them.
 function migrateChapterColumns(db) {
-  const add = (table, column) => {
-    const columns = db.pragma(`table_info(${table})`).map((info) => info.name);
-    if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
-  };
-  add('materials', 'page_offsets');
-  add('materials', 'outline');
-  add('notes', 'chapters');
+  addTextColumn(db, 'materials', 'page_offsets');
+  addTextColumn(db, 'materials', 'outline');
+  addTextColumn(db, 'notes', 'chapters');
+}
+
+// Databases created before the requested provider was stored have no columns for it. They are
+// added empty; notes that were still processing then have no stored choice, and a restored job
+// for them fails instead of guessing a provider.
+function migrateRequestedLlmColumns(db) {
+  addTextColumn(db, 'notes', 'requested_provider');
+  addTextColumn(db, 'notes', 'requested_model');
+}
+
+// Adds an empty TEXT column when the table does not have it yet; existing rows keep their data
+function addTextColumn(db, table, column) {
+  const columns = db.pragma(`table_info(${table})`).map((info) => info.name);
+  if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
 }
 
 // The value of a JSON column (e.g. materials.outline, notes.chapters), or fallback when it is

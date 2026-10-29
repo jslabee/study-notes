@@ -2,6 +2,13 @@
 import { closeDb, getDb } from '../db.js';
 import { indexMaterial } from './index.js';
 
+// The script and a running server write to the same database without coordinating; a server
+// started meanwhile would also queue the materials this script marks as processing
+console.warn(
+  'Warning: stop the server (npm run dev or npm start) before reindexing. ' +
+    'The script and a running server write to the same database without coordinating.'
+);
+
 const db = getDb();
 const materials = db.prepare('SELECT id, title FROM materials ORDER BY id').all();
 const setProcessing = db.prepare(

@@ -32,15 +32,34 @@ function formatDuration(ms) {
   return minutes ? `${minutes} min ${seconds % 60} s` : `${seconds} s`;
 }
 
+// The provider and model stored with notes whose job was restored after a restart. The choice is
+// checked again (the model may have been removed, Ollama may not run, OpenAI may be disabled) and
+// never replaced by another provider or model: notes meant for the local model must not be sent
+// to OpenAI. Throws an error that names the stored choice when it cannot be used.
+async function storedLlm({ requested_provider: provider, requested_model: model }) {
+  if (!provider || !model) {
+    throw new Error(
+      'The provider and model chosen for these notes are not known (they were requested before an update). Generate them again.'
+    );
+  }
+  try {
+    return await resolveLlm({ provider, model });
+  } catch (err) {
+    throw new Error(`The model chosen for these notes (${provider}:${model}) is no longer available: ${err.message}`);
+  }
+}
+
 const handlers = {
   index: (materialId) => indexMaterial(materialId),
   // Notes jobs use the id of the notes row, so each style of a material is its own job.
-  // llm is the provider and model resolved for the request; restored jobs use the defaults.
+  // llm is the provider and model resolved for the request; a restored job has none and uses the
+  // choice stored with the notes (see storedLlm).
   // The duration, number of model calls and model are logged, so runs can be compared.
   notes: async (notesId, llm) => {
     const row = getDb()
       .prepare(
-        `SELECT n.style, n.chapters, m.id, m.title, m.content, m.outline FROM notes n
+        `SELECT n.style, n.chapters, n.requested_provider, n.requested_model,
+                m.id, m.title, m.content, m.outline FROM notes n
          JOIN materials m ON m.id = n.material_id
          WHERE n.id = ? AND n.status = 'processing'`
       )
@@ -56,7 +75,7 @@ const handlers = {
       `${formatDuration(Date.now() - startedAt)}, ${progress.done} calls, ` +
       (used ? `${used.provider}:${used.model}` : 'no model');
     try {
-      used = llm ?? (await resolveLlm({ textLength: row.content.length }));
+      used = llm ?? (await storedLlm(row));
       // A stored outline or detection that cannot be read counts as none
       const outline = parseJson(row.outline, null);
       const stored = parseJson(row.chapters, null);
