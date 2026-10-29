@@ -70,11 +70,37 @@ export function getDb() {
   migrateNotesStyle(db);
   migrateChapterColumns(db);
   migrateRequestedLlmColumns(db);
-  // one vector per chunk; rowid = chunks.id
-  db.exec(
-    `CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(embedding float[${embedDim}]);`
-  );
+  createVectorTable(db, embedDim);
   return db;
+}
+
+// One vector per chunk; rowid = chunks.id. material_id is a metadata column of the vec0 table, so
+// search can keep only the chunks of allowed materials inside the nearest-neighbor query.
+const vectorTableSql = (name, dim) =>
+  `CREATE VIRTUAL TABLE ${name} USING vec0(embedding float[${dim}], material_id integer)`;
+
+function createVectorTable(db, embedDim) {
+  const existing = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'chunk_vectors'").get();
+  if (!existing) db.exec(vectorTableSql('chunk_vectors', embedDim));
+  else if (!/\bmaterial_id\b/.test(existing.sql)) migrateVectorMaterialIds(db, existing.sql);
+}
+
+// Databases created before search filtered by material have vectors without material_id. A vec0
+// table cannot get a new column, so the table is recreated and the vectors are copied back with
+// the material of their chunk, keeping their rowids and their dimension; nothing is embedded
+// again. Vectors without a chunk could never be found by search and are not copied. The copy goes
+// through an ordinary table because renaming a vec0 table does not rename its shadow tables.
+function migrateVectorMaterialIds(db, sql) {
+  const dim = Number(sql.match(/float\[(\d+)\]/)[1]);
+  db.transaction(() => {
+    db.exec(`CREATE TEMP TABLE chunk_vectors_copy AS
+      SELECT v.rowid AS id, v.embedding, c.material_id FROM chunk_vectors v JOIN chunks c ON c.id = v.rowid`);
+    db.exec('DROP TABLE chunk_vectors');
+    db.exec(vectorTableSql('chunk_vectors', dim));
+    db.exec(`INSERT INTO chunk_vectors (rowid, embedding, material_id)
+      SELECT id, embedding, material_id FROM chunk_vectors_copy`);
+    db.exec('DROP TABLE chunk_vectors_copy');
+  })();
 }
 
 // Databases created before PDF import do not allow type 'pdf'. SQLite cannot alter a CHECK

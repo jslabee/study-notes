@@ -361,9 +361,17 @@ rezultate skupin.
 Below are notes for individual parts of the same material. Merge them into a single set of notes with the same structure (Summary, Key points, Terms). Remove repetition. The summary should have 4 to 6 sentences and there should be at most 25 key points. Do not add anything.
 ```
 
+To navodilo za združevanje je z Nadgradnjo 5 nadomeščeno s splošnim navodilom
+»Združevanje delov dolgih gradiv (za vse sloge)«, ki velja tudi za slog study-notes.
+
 Največ 4000 izhodnih žetonov na klic. Model se bere iz OPENAI_MODEL . Ob začasni napaki
 API (omejitev hitrosti, napaka strežnika) se klic ponovi največ trikrat s podaljšano
 zakasnitvijo.
+Po Nadgradnji 4 velja: odgovori na vprašanja imajo največ 4000 izhodnih žetonov, zapiski pri
+OpenAI OPENAI_MAX_OUTPUT_TOKENS (privzeto 16000) z enim ponovnim poskusom pri dvojni meji,
+OPENAI_REASONING_EFFORT pa omeji porabo za razmišljanje. Lokalni model upošteva
+LOCAL_CONTEXT_TOKENS (enako kot OLLAMA_CONTEXT_LENGTH) in LOCAL_MAX_OUTPUT_TOKENS. Ob
+omejitvi hitrosti (429) se upošteva glava Retry-After.
 
 ### Iskanje (RAG)
 Sistemsko navodilo za odgovor:
@@ -402,6 +410,7 @@ shranjevanjem in pred iskanjem
 6 najbolj podobnih; pri filtru po tečaju ali po
 izbranih gradivih (materialIds) najprej 30,
 nato filtriraj in obdrži 6
+Pravilo »najprej 30, nato filtriraj« je nadomeščeno z Nadgradnjo 7.
 
 ## Postopek gradnje
 Osem korakov (0–7). Koraka 0 in 1 narediš sam, korake 2–7 gradi Claude Code po navodilih
@@ -778,6 +787,10 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
    functions still work: create a course, add sources (including a PDF), generate
    notes, ask a question with all sources and with only some sources selected.
 ```
+Preverjanje
+npm run build  uspe.
+Vse funkcije iz točke 8 delujejo; odgovor pri nekaj izbranih virih navaja samo te vire.
+Na ozkem oknu so paneli prikazani kot zavihki; temna tema deluje.
 ### Nadgradnja 4 – Izbira ponudnika in modela
 Zapiski in odgovori lahko tečejo na lokalnem modelu (Ollama) ali OpenAI. Način auto
 uporabi lokalni model za besedila do LOCAL_MAX_CHARS, sicer OpenAI; local nikoli ne
@@ -791,62 +804,6 @@ Uporabnik izbere slog povzetka. Zapiski se shranijo ločeno po slogu (materials 
 unikatno material_id + style). Slogi in sistemska navodila (dobesedno):
 
 study-notes (Study notes, privzeto): obstoječe navodilo iz razdelka "Zapiski".
-
-### Nadgradnja 6 – Povzetek po poglavjih (slog by-chapter)
-Nov slog »By chapter«: pregled celote in povzetek vsakega poglavja ali dela vsebine.
-Poglavje, daljše od enega dela, se razdeli in združi znotraj poglavja.
-
-Prepoznavanje poglavij je splošno in ni odvisno od zapisa naslovov. Vrstni red:
-1. PDF: kazalo (outline/bookmarks), prebrano ob uvozu, z mesti poglavij v besedilu.
-2. Model izbere poglavja med kandidati (kratke samostojne vrstice s številom besed do
-   naslednjega kandidata), z navodilom:
-```text
-You receive candidate heading lines from a long document, in document order. Each
-line has an id and the number of words that follow it until the next candidate.
-Identify the lines that start the main chapters of the document: top-level chapters
-only, not subsections, not table of contents entries, not running page headers or
-footers. Respond only with JSON in document order:
-{"chapters":[{"id": <id>, "title": "<clean chapter title>"}]}
-If the document has no chapters, respond {"chapters":[]}.
-```
-3. Brez naslovov: delitev po temah iz vektorjev zaporednih kosov (mesta največjega
-   padca podobnosti), z naslovom vsakega dela po navodilu:
-```text
-Give a short title (at most 8 words) for this section of learning material. Use only
-information from the section. Respond with the title only.
-```
-Rezultat se preveri: od 2 do 60 poglavij v pravilnem vrstnem redu, vsako vsaj okoli 300
-besed (krajša se združijo s sosednjim). Če preverjanje ne uspe, se uporabi naslednji način.
-
-Navodilo za posamezno poglavje:
-```text
-You are an assistant that summarizes one chapter of a book or long learning material.
-Use only information from the chapter; do not add or invent anything. Respond only in
-Markdown with exactly this structure:
-
-## {chapter title}
-A paragraph of 3 to 6 sentences describing what the chapter covers and its main
-conclusions.
-
-**Key points**
-3 to 8 bullet points with the most important ideas of the chapter.
-```
-
-Navodilo za pregled celote:
-```text
-Below are summaries of all chapters of the same material, in order. Write an overview
-of the whole material. Use only information from the summaries; do not add anything.
-Respond only in Markdown with exactly this structure:
-
-## Overview
-A paragraph of 4 to 8 sentences describing what the whole material covers and how the
-chapters build on each other.
-
-## Chapters at a glance
-A numbered list with one sentence per chapter: **chapter title** – what it covers.
-```
-
-Končni rezultat: Overview, Chapters at a glance, nato povzetki poglavij po vrstnem redu.
 
 brief (Brief):
 ```text
@@ -942,10 +899,90 @@ Instructions:
 {style instructions}
 ```
 
-Preverjanje
-npm run build  uspe.
-Vse funkcije iz točke 8 delujejo; odgovor pri nekaj izbranih virih navaja samo te vire.
-Na ozkem oknu so paneli prikazani kot zavihki; temna tema deluje.
+### Nadgradnja 6 – Povzetek po poglavjih (slog by-chapter)
+Nov slog »By chapter«: pregled celote in povzetek vsakega poglavja ali dela vsebine.
+Poglavje, daljše od enega dela, se razdeli in združi znotraj poglavja.
+
+Prepoznavanje poglavij je splošno in ni odvisno od zapisa naslovov. Vrstni red:
+1. PDF: kazalo (outline/bookmarks), prebrano ob uvozu, z mesti poglavij v besedilu.
+2. Model izbere poglavja med kandidati (kratke samostojne vrstice s številom besed do
+   naslednjega kandidata), z navodilom:
+```text
+You receive candidate heading lines from a long document, in document order. Each
+line has an id and the number of words that follow it until the next candidate.
+Identify the lines that start the main chapters of the document: top-level chapters
+only, not subsections, not table of contents entries, not running page headers or
+footers. Respond only with JSON in document order:
+{"chapters":[{"id": <id>, "title": "<clean chapter title>"}]}
+If the document has no chapters, respond {"chapters":[]}.
+```
+3. Brez naslovov: delitev po temah iz vektorjev zaporednih kosov (mesta največjega
+   padca podobnosti), z naslovom vsakega dela po navodilu:
+```text
+Give a short title (at most 8 words) for this section of learning material. Use only
+information from the section. Respond with the title only.
+```
+Rezultat se preveri: od 2 do 60 poglavij v pravilnem vrstnem redu, vsako vsaj okoli 300
+besed (krajša se združijo s sosednjim). Če preverjanje ne uspe, se uporabi naslednji način.
+
+Navodilo za posamezno poglavje:
+```text
+You are an assistant that summarizes one chapter of a book or long learning material.
+Use only information from the chapter; do not add or invent anything. Respond only in
+Markdown with exactly this structure:
+
+## {chapter title}
+A paragraph of 3 to 6 sentences describing what the chapter covers and its main
+conclusions.
+
+**Key points**
+3 to 8 bullet points with the most important ideas of the chapter.
+```
+
+Navodilo za pregled celote:
+```text
+Below are summaries of all chapters of the same material, in order. Write an overview
+of the whole material. Use only information from the summaries; do not add anything.
+Respond only in Markdown with exactly this structure:
+
+## Overview
+A paragraph of 4 to 8 sentences describing what the whole material covers and how the
+chapters build on each other.
+
+## Chapters at a glance
+A numbered list with one sentence per chapter: **chapter title** – what it covers.
+```
+
+Končni rezultat: Overview, Chapters at a glance, nato povzetki poglavij po vrstnem redu.
+
+### Nadgradnja 7 – Iskanje samo po dovoljenih gradivih
+Veja fix/search-filter. Nadomesti pravilo »najprej 30, nato filtriraj« iz razdelka »Iskanje
+(RAG)« in iz Nadgradnje 2. Šest najdenih kosov je vedno najbolj podobnih med dovoljenimi kosi:
+samo gradiva s stanjem ready, iz izbranega tečaja in, če je podano, iz materialIds. Prej je
+globalnih 30 najbližjih kosov lahko pripadalo samo drugim gradivom, zato je odgovor ostal
+»I could not find the answer in the materials.«, čeprav so izbrana gradiva odgovor vsebovala.
+Filtriranje poteka v sami poizvedbi KNN (stolpec material_id v tabeli chunk_vectors) ali, če to
+ni mogoče, s postopnim večanjem k. Obstoječi vektorji se ohranijo brez ponovnega računanja.
+
+### Popravki po pregledu kode
+Celoten pregled je v docs/code-review.md. Popravljeno na vejah fix/review-reliability,
+fix/review-security in docs/readme (oznaka v1.4):
+- Časovne omejitve klicev (nove spremenljivke EMBED_TIMEOUT_MS=60000,
+  OPENAI_TIMEOUT_MS=300000, LOCAL_CHAT_TIMEOUT_MS=900000). Lokalni odgovori se pretakajo
+  (stream), ker Node.js sicer po 300 s neha čakati na odgovor.
+- Vektorji: paket se ob omrežni napaki ali napaki 5xx ponovi do trikrat.
+- Omejitev hitrosti (429): upošteva se glava Retry-After, sicer zakasnitve 5, 10 in 20 s.
+- Prepoznavanje poglavij preide na naslednji način samo pri neuporabnem odgovoru modela;
+  napaka povezave, prijave, omejitve hitrosti ali časovne omejitve opravilo prekine.
+- Izbrani ponudnik in model se shranita v notes (requested_provider, requested_model), zato
+  opravilo po ponovnem zagonu strežnika uporabi isto izbiro in nikoli ne preklopi na drugega
+  ponudnika.
+- README opisuje trenutne funkcije in vse spremenljivke iz .env.example.
+
+Zavestno ni popravljeno (omejitve prototipa): aplikacija nima prijave in je namenjena samo
+internemu omrežju podjetja; dolga opravila ne shranjujejo delnih rezultatov; branje velikega
+PDF in preverjanje poglavij tečeta v glavni niti strežnika; opravil ni mogoče preklicati.
+
 ## Priloga: CLAUDE.md in samodejni dnevnik razvoja
 Dnevnik nastaja iz dveh virov. Claude Code ob vsakem tvojem navodilu sproži skripto
 (hook), ki navodilo dobesedno zapiše. Ko Claude Code konča odgovor, ista skripta iz

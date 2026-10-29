@@ -1282,3 +1282,32 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch main, changed files: 8
 
 **My changes and outcome:** 
+
+### 29/10/2026, 21:23:58
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix finding R19 from docs/code-review.md (also reported by a second review as CR-01).
+> 
+> Problem: search takes the global top 30 nearest chunks and only then filters by course, selected materials and ready status, so the selected materials can return no results even when they contain the answer.
+> 
+> Required behaviour: the 6 results must always be the nearest chunks among the allowed chunks only (ready materials, the selected course and the selected materialIds).
+> 
+> - Prefer filtering inside the KNN query (for example a material_id metadata or partition column in the vec0 table, if the installed sqlite-vec version supports it). If the table must be recreated, migrate the existing vectors by copying them, without re-embedding and without losing data.
+> - If that is not possible, keep searching with a larger k until 6 allowed results are found or all chunks have been checked.
+> - Add a test with many closer chunks from other or not-ready materials, where the selected material must still return its chunks.
+> 
+> This intentionally replaces the rule "first 30, then filter" in docs/spec.md; I will update the spec myself.
+> Run npm test and npm run build.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> At the end tell me whether an existing database needs any manual step (for example npm run reindex).
+> </pasted_content id="7e18">
+
+**Summary:** Fixed R19/CR-01 so search finds the 6 nearest chunks among ready, selected-course and selected materials only, by filtering on a material_id column inside the vector query; an automatic migration copies existing vectors without re-embedding (server/db.js, server/rag/index.js, server/rag/search.js). Updated tests/rag.test.js, tests/materials.test.js and tests/indexing.test.js, and added tests/vector-migration.test.js.
+
+**Type:** bugfix
+
+**Git:** branch fix/search-filter, changed files: 9
+
+**My changes and outcome:** 

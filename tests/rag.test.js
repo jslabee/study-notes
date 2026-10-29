@@ -40,7 +40,11 @@ function addChunk(materialId, angle, text = `chunk at ${angle}`) {
   const id = db
     .prepare('INSERT INTO chunks (material_id, position, text) VALUES (?, 0, ?)')
     .run(materialId, text).lastInsertRowid;
-  db.prepare('INSERT INTO chunk_vectors (rowid, embedding) VALUES (?, ?)').run(BigInt(id), atAngle(angle));
+  db.prepare('INSERT INTO chunk_vectors (rowid, embedding, material_id) VALUES (?, ?, ?)').run(
+    BigInt(id),
+    atAngle(angle),
+    BigInt(materialId)
+  );
   return Number(id);
 }
 
@@ -82,13 +86,12 @@ test('search uses only materials with status ready', async () => {
   for (const angle of [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]) addChunk(ready, angle);
 
   const results = await searchChunks('question', { embed: questionEmbed });
-  assert.ok(results.length > 0);
+  // Closer chunks of materials that are not ready do not take the places of ready ones
+  assert.equal(results.length, 6);
   assert.ok(results.every((r) => r.materialId === ready));
-  // The spec takes the 6 nearest chunks, so chunks of materials that are not ready reduce the count
-  assert.equal(results.length, 4);
 });
 
-test('with courseId, the 30 nearest chunks are filtered to the first 6 of that course', async () => {
+test('with courseId, the 6 nearest chunks of that course are found', async () => {
   const other = addMaterial(courseB, 'Other course');
   const own = addMaterial(courseA, 'Own course');
   for (let i = 0; i < 20; i++) addChunk(other, 0.01 + i * 0.01); // ranks 1-20
@@ -103,16 +106,17 @@ test('with courseId, the 30 nearest chunks are filtered to the first 6 of that c
   assert.ok(all.every((r) => r.materialId === other));
 });
 
-test('with courseId, chunks outside the 30 nearest are not found', async () => {
+test('with courseId, chunks of the course are found behind any number of closer chunks of other courses', async () => {
   const other = addMaterial(courseB, 'Other course');
   const own = addMaterial(courseA, 'Own course');
-  for (let i = 0; i < 30; i++) addChunk(other, 0.01 + i * 0.01);
-  addChunk(own, 1.2);
+  for (let i = 0; i < 100; i++) addChunk(other, 0.001 + i * 0.001);
+  const ownId = addChunk(own, 1.2);
 
-  assert.deepEqual(await searchChunks('question', { courseId: courseA, embed: questionEmbed }), []);
+  const results = await searchChunks('question', { courseId: courseA, embed: questionEmbed });
+  assert.deepEqual(results.map((r) => r.chunkId), [ownId]);
 });
 
-test('with materialIds, the 30 nearest chunks are filtered to the first 6 of those materials', async () => {
+test('with materialIds, the 6 nearest chunks of those materials are found', async () => {
   const other = addMaterial(courseA, 'Not selected');
   const first = addMaterial(courseA, 'Selected 1');
   const second = addMaterial(courseB, 'Selected 2');
@@ -128,13 +132,48 @@ test('with materialIds, the 30 nearest chunks are filtered to the first 6 of tho
   );
 });
 
-test('with materialIds, chunks outside the 30 nearest are not found', async () => {
-  const other = addMaterial(courseA, 'Not selected');
+test('the selected material returns its chunks behind many closer chunks of other and not-ready materials', async () => {
+  // 300 closer chunks: of other ready materials in the same and another course, of a material
+  // that is still processing and of one that failed
+  const closer = [
+    addMaterial(courseA, 'Not selected'),
+    addMaterial(courseB, 'Other course'),
+    addMaterial(courseA, 'Processing', 'processing'),
+    addMaterial(courseA, 'Failed', 'error'),
+  ];
+  for (let i = 0; i < 300; i++) addChunk(closer[i % closer.length], 0.001 + i * 0.001);
   const selected = addMaterial(courseA, 'Selected');
-  for (let i = 0; i < 30; i++) addChunk(other, 0.01 + i * 0.01);
-  addChunk(selected, 1.2);
+  const selectedIds = [1.0, 1.4, 1.1, 1.3, 1.2, 1.5, 1.45, 1.05].map((angle) => ({ angle, id: addChunk(selected, angle) }));
+  const nearest = [...selectedIds].sort((a, b) => a.angle - b.angle).slice(0, 6).map((c) => c.id);
 
-  assert.deepEqual(await searchChunks('question', { materialIds: [selected], embed: questionEmbed }), []);
+  for (const options of [{ materialIds: [selected] }, { materialIds: [selected], courseId: courseA }]) {
+    const results = await searchChunks('question', { ...options, embed: questionEmbed });
+    assert.deepEqual(results.map((r) => r.chunkId), nearest);
+    assert.ok(results.every((r) => r.title === 'Selected'));
+  }
+
+  // A selected material that is not ready contributes nothing, even with the closest chunks
+  assert.deepEqual(await searchChunks('question', { materialIds: [closer[2], closer[3]], embed: questionEmbed }), []);
+});
+
+test('the answer to a question about a selected material comes from its chunks', async () => {
+  const other = addMaterial(courseA, 'Other');
+  for (let i = 0; i < 50; i++) addChunk(other, 0.001 + i * 0.001);
+  const selected = addMaterial(courseA, 'Selected');
+  addChunk(selected, 1.3, 'ATP is the energy currency of the cell.');
+
+  const calls = [];
+  const result = await answerQuestion('What is ATP?', {
+    materialIds: [selected],
+    embed: questionEmbed,
+    resolve: async () => ({ provider: 'openai', model: 'test-model' }),
+    chat: async (args) => {
+      calls.push(args.user);
+      return { text: 'ATP is the energy currency [1].', provider: 'openai', model: 'test-model' };
+    },
+  });
+  assert.deepEqual(result.sources.map((s) => s.title), ['Selected']);
+  assert.match(calls[0], /^Excerpts:\n\[1\] \(Selected\) ATP is the energy currency of the cell\.\n/);
 });
 
 test('without materialIds or with an empty list, all materials are searched', async () => {

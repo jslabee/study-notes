@@ -69,10 +69,12 @@ test('new material is indexed: chunks and vectors are stored and it becomes read
   assert.deepEqual(rows.map((r) => r.text), expected);
   assert.deepEqual(rows.map((r) => r.position), expected.map((_, i) => i));
 
-  // rowid of every vector is the id of its chunk, and vectors are unit length
+  // rowid of every vector is the id of its chunk, it stores the material for filtered search,
+  // and vectors are unit length
   for (const row of rows) {
-    const vector = db.prepare('SELECT embedding FROM chunk_vectors WHERE rowid = ?').get(BigInt(row.id));
+    const vector = db.prepare('SELECT embedding, material_id FROM chunk_vectors WHERE rowid = ?').get(BigInt(row.id));
     assert.ok(vector, `vector for chunk ${row.id}`);
+    assert.equal(vector.material_id, id);
     const values = new Float32Array(vector.embedding.buffer, vector.embedding.byteOffset, 8);
     const length = Math.sqrt(values.reduce((sum, x) => sum + x * x, 0));
     assert.ok(Math.abs(length - 1) < 1e-5);

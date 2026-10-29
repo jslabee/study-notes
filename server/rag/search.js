@@ -2,43 +2,44 @@ import { getDb } from '../db.js';
 import { embed as llmEmbed } from '../llm.js';
 
 export const RESULT_COUNT = 6;
-export const COURSE_CANDIDATES = 30;
 
-// Finds the chunks most similar to the question, only from ready materials.
-// With a courseId or a non-empty list of materialIds, the 30 nearest chunks are searched and
-// the first 6 that match every given filter are kept.
+// The materials whose chunks may be found: ready materials, only of the course when a courseId is
+// given and only the listed ones when materialIds is a non-empty list
+function allowedMaterialIds(db, { courseId, materialIds }) {
+  const byCourse = courseId !== undefined && courseId !== null;
+  const ids = db
+    .prepare(`SELECT id FROM materials WHERE status = 'ready'${byCourse ? ' AND course_id = ?' : ''}`)
+    .pluck()
+    .all(...(byCourse ? [courseId] : []));
+  if (!materialIds?.length) return ids;
+  const selected = new Set(materialIds);
+  return ids.filter((id) => selected.has(id));
+}
+
+// Finds the 6 chunks most similar to the question among the chunks of the allowed materials (see
+// allowedMaterialIds). The material filter is part of the nearest-neighbor query (material_id is
+// a metadata column of chunk_vectors), so closer chunks of other materials never take the places
+// of allowed ones.
 // embed is replaceable so tests do not need Ollama.
 export async function searchChunks(question, { courseId, materialIds, embed = llmEmbed } = {}) {
   const [vector] = await embed([question]);
-  const filterByCourse = courseId !== undefined && courseId !== null;
-  const materials = materialIds?.length ? new Set(materialIds) : null;
-  const k = filterByCourse || materials ? COURSE_CANDIDATES : RESULT_COUNT;
+  // Read after the embedding, so the statuses are current when the query runs
+  const db = getDb();
+  const allowed = allowedMaterialIds(db, { courseId, materialIds });
+  if (allowed.length === 0) return [];
 
-  const rows = getDb()
+  return db
     .prepare(
-      `SELECT c.id AS chunkId, c.material_id AS materialId, m.course_id AS courseId,
-              m.title, c.text, v.distance
+      `SELECT c.id AS chunkId, c.material_id AS materialId, m.title, c.text, v.distance
        FROM (
          SELECT rowid, distance FROM chunk_vectors
          WHERE embedding MATCH ? AND k = ?
+           AND material_id IN (SELECT value FROM json_each(?))
          ORDER BY distance
        ) v
        JOIN chunks c ON c.id = v.rowid
        JOIN materials m ON m.id = c.material_id
-       WHERE m.status = 'ready'
        ORDER BY v.distance`
     )
-    .all(vector, k);
-
-  return rows
-    .filter((row) => !filterByCourse || row.courseId === courseId)
-    .filter((row) => !materials || materials.has(row.materialId))
-    .slice(0, RESULT_COUNT)
-    .map(({ chunkId, materialId, title, text, distance }) => ({
-      chunkId,
-      materialId,
-      title,
-      text,
-      distance,
-    }));
+    .all(vector, RESULT_COUNT, JSON.stringify(allowed));
 }
