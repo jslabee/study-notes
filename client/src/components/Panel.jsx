@@ -20,7 +20,11 @@ function Panel({
 
   if (collapsed) {
     return (
-      <section className={`panel panel-collapsed ${className}`} aria-labelledby={titleId}>
+      <section
+        className={`panel panel-collapsed ${className}`}
+        aria-labelledby={titleId}
+        hidden={hidden}
+      >
         <button
           type="button"
           className="icon-btn"

@@ -28,8 +28,11 @@
   text-decoration: underline;
 }
 
-/* Style, provider and model for generating notes */
+/* Style, provider and model for generating notes. The controls sit in fixed grid columns, so
+   the row does not change with the selected provider or the length of a model name; the
+   breakpoints follow the width of the bar itself, because the Notes panel can be resized. */
 .notes-generate-bar {
+  container: notes-generate / inline-size;
   display: grid;
   gap: var(--space-2);
   flex: none;
@@ -37,17 +40,75 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.notes-style-field .select {
+.notes-generate {
+  display: grid;
+  /* The selects grow up to 18rem; beyond that the space goes before the button */
+  grid-template-columns: minmax(7rem, 18rem) auto minmax(7rem, 18rem) minmax(0, 1fr) auto;
+  grid-template-areas: 'style provider model . button';
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* The picker's provider switch, model select and warning become cells of this grid */
+.notes-generate .llm-picker {
+  display: contents;
+}
+
+.notes-style-field {
+  display: grid;
+  grid-area: style;
+  min-width: 0;
+}
+
+.notes-generate .segmented {
+  grid-area: provider;
+}
+
+.notes-generate .select-small {
   width: 100%;
+  min-width: 0;
+  max-width: none;
   text-overflow: ellipsis;
 }
 
-.notes-generate {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
+.notes-generate .llm-picker > .select-small {
+  grid-area: model;
+}
+
+.notes-generate .llm-picker-warning {
+  grid-column: 1 / -1;
+}
+
+/* Wide enough for both labels, so the button does not move when it changes */
+.notes-generate-button {
+  grid-area: button;
+  justify-content: center;
+  min-width: 7.5rem;
+}
+
+/* Narrower: the selectors on one row and the button on the next */
+@container notes-generate (max-width: 36rem) {
+  .notes-generate {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas:
+      'style provider model'
+      'button button button';
+  }
+
+  .notes-generate-button {
+    justify-self: end;
+  }
+}
+
+/* Narrowest: the style on its own row, then provider and model, then the button */
+@container notes-generate (max-width: 26rem) {
+  .notes-generate {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+      'style style'
+      'provider model'
+      'button button';
+  }
 }
 
 /* One tab per generated style */
@@ -101,12 +162,21 @@
 }
 
 .notes-progress-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-3);
   color: var(--color-accent-text);
   font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.notes-progress-steps,
+.notes-progress-time {
+  color: var(--color-text-muted);
+  font-weight: normal;
+}
+
+/* With a known number of steps the bar shows how many are done */
+.progress-bar-determinate span {
+  animation: none;
+  transition: width 0.4s ease;
 }
 
 .progress-bar {
@@ -137,6 +207,12 @@
 
 .notes-content {
   padding: var(--space-1) var(--space-2) var(--space-4);
+}
+
+/* A comfortable reading width, centered, however wide the panel is */
+.notes-tabpanel {
+  max-width: 80ch;
+  margin: 0 auto;
 }
 
 /* Markdown */

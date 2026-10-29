@@ -211,6 +211,7 @@ test('local chat goes to the OpenAI-compatible Ollama endpoint', async () => {
     maxOutputTokens: 4000,
   });
   assert.deepEqual(reply, { text: 'Local answer [1].', provider: 'local', model: 'gemma3:4b' });
+  // Local calls use LOCAL_MAX_OUTPUT_TOKENS (default 2048), not the caller's limit
   assert.deepEqual(fake.chatRequests, [
     {
       model: 'gemma3:4b',
@@ -218,10 +219,160 @@ test('local chat goes to the OpenAI-compatible Ollama endpoint', async () => {
         { role: 'system', content: 'System.' },
         { role: 'user', content: 'Question?' },
       ],
-      max_tokens: 4000,
+      max_tokens: 2048,
     },
   ]);
 });
+
+const LOCAL_CONTEXT = /too large for the local model's context.*LOCAL_CONTEXT_TOKENS and OLLAMA_CONTEXT_LENGTH/;
+
+function withLocalTokens(context, output, fn) {
+  return async () => {
+    if (context) process.env.LOCAL_CONTEXT_TOKENS = String(context);
+    if (output) process.env.LOCAL_MAX_OUTPUT_TOKENS = String(output);
+    fake.chatRequests.length = 0;
+    llm.resetTokenRatio();
+    try {
+      await fn();
+    } finally {
+      delete process.env.LOCAL_CONTEXT_TOKENS;
+      delete process.env.LOCAL_MAX_OUTPUT_TOKENS;
+      delete fake.chatError;
+      delete fake.finishReason;
+      delete fake.charsPerToken;
+      delete fake.outputTokens;
+      llm.resetTokenRatio();
+    }
+  };
+}
+
+test('the local context defaults to 16384 tokens with 2048 output tokens', withLocalTokens(null, null, () => {
+  const config = llm.llmConfig();
+  assert.equal(config.localContextTokens, 16384);
+  assert.equal(config.localMaxOutputTokens, 2048);
+  // Conservative estimate: three characters per token
+  assert.equal(llm.tokenRatio(), 3);
+  assert.equal(llm.estimateTokens('a'.repeat(300)), 100);
+  assert.equal(llm.estimateTokens('abcde'), 2);
+}));
+
+test(
+  'a request fits when input + output tokens + 10% fit into LOCAL_CONTEXT_TOKENS',
+  withLocalTokens(11000, 1000, () => {
+    // (input + 1000) * 1.1 <= 11000 allows about 9000 input tokens (27,000 characters)
+    assert.ok(llm.fitsLocalContext('a'.repeat(3000), 'b'.repeat(23700)));
+    assert.ok(!llm.fitsLocalContext('a'.repeat(3000), 'b'.repeat(24300)));
+  })
+);
+
+test(
+  'the ratio follows the prompt tokens reported by Ollama and keeps the most conservative value',
+  withLocalTokens(null, null, async () => {
+    const send = (chars) =>
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'x'.repeat(chars - 1) });
+
+    // 6000 characters reported as 3000 tokens: 2 characters per token
+    fake.charsPerToken = 2;
+    await send(6000);
+    assert.equal(llm.tokenRatio(), 2);
+    assert.equal(llm.estimateTokens('a'.repeat(300)), 150);
+
+    // A less conservative count later does not raise it again
+    fake.charsPerToken = 5;
+    await send(6000);
+    assert.equal(llm.tokenRatio(), 2);
+
+    // Short prompts are mostly chat template tokens and do not count
+    fake.charsPerToken = 0.5;
+    await send(100);
+    assert.equal(llm.tokenRatio(), 2);
+  })
+);
+
+test(
+  'every local call logs the estimated and reported tokens, its purpose and LOCAL_CONTEXT_TOKENS',
+  withLocalTokens(null, null, async (t) => {
+    const log = mock.method(console, 'log', () => {});
+    try {
+      fake.charsPerToken = 4;
+      await llm.chat({
+        provider: 'local',
+        model: 'gemma3:4b',
+        system: 'S',
+        user: 'x'.repeat(5999),
+        purpose: 'merge of 4 notes',
+      });
+    } finally {
+      log.mock.restore();
+    }
+    assert.deepEqual(log.mock.calls.map((c) => c.arguments[0]), [
+      '[llm] local gemma3:4b merge of 4 notes: estimated input 2001 tokens (3.00 chars/token), ' +
+        'reported prompt 1500, output 5 tokens, finish stop, max output 2048, LOCAL_CONTEXT_TOKENS 16384',
+    ]);
+  })
+);
+
+test(
+  'LOCAL_MAX_OUTPUT_TOKENS sets max_tokens for local calls',
+  withLocalTokens(65536, 8192, async () => {
+    await llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U', maxOutputTokens: 4000 });
+    assert.equal(fake.chatRequests[0].max_tokens, 8192);
+  })
+);
+
+test(
+  'a local request that does not fit the context is not sent',
+  withLocalTokens(4096, 1024, async () => {
+    await rejectsWith(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'x'.repeat(12000) }),
+      422,
+      LOCAL_CONTEXT
+    );
+    assert.equal(fake.chatRequests.length, 0);
+  })
+);
+
+test(
+  'a context error from Ollama gives the local context message and is not retried',
+  withLocalTokens(null, null, async () => {
+    fake.chatError = { status: 500, message: 'the input length exceeds the context length' };
+    await rejectsWith(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
+      422,
+      LOCAL_CONTEXT
+    );
+    assert.equal(fake.chatRequests.length, 1);
+  })
+);
+
+test(
+  'a reply that used all LOCAL_MAX_OUTPUT_TOKENS is an output limit error, not a context error',
+  withLocalTokens(null, null, async () => {
+    fake.finishReason = 'length';
+    fake.outputTokens = 2048;
+    await assert.rejects(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
+      (err) => {
+        assert.ok(err instanceof llm.OutputLimitError);
+        assert.equal(err.message, llm.LOCAL_OUTPUT_TOO_LONG_ERROR);
+        return true;
+      }
+    );
+  })
+);
+
+test(
+  'a reply cut off before the output limit means Ollama ran out of context',
+  withLocalTokens(null, null, async () => {
+    fake.finishReason = 'length';
+    fake.outputTokens = 700;
+    await rejectsWith(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
+      422,
+      LOCAL_CONTEXT
+    );
+  })
+);
 
 test('OpenAI chat returns the provider and model used', async () => {
   fakeOpenAI.requests.length = 0;

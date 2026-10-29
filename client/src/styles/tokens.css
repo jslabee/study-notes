@@ -73,8 +73,6 @@
 
   /* Layout and motion */
   --topbar-height: 56px;
-  --panel-left-width: 300px;
-  --panel-right-width: 380px;
   --panel-collapsed-width: 52px;
   --duration-fast: 120ms;
   --duration-normal: 200ms;
