@@ -45,6 +45,11 @@ export function getMaterial(id) {
   return request(`/api/materials/${id}`)
 }
 
+// The original PDF of a material, opened at a page by the browser's PDF viewer
+export function materialFileUrl(id, page) {
+  return `/api/materials/${id}/file${page ? `#page=${page}` : ''}`
+}
+
 // fields: { courseId, title } plus either text or file
 export function uploadMaterial({ courseId, title, text, file }) {
   const form = new FormData()

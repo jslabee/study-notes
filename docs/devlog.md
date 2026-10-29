@@ -1366,3 +1366,27 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch main, changed files: 15
 
 **My changes and outcome:** 
+
+### 29/10/2026, 23:10:08
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Show PDF sources in their original form.
+> 
+> - On PDF upload, also store the original PDF file in a folder under data/ (path from an environment variable with a default such as data/files), named by material id. Delete the file when the material is deleted. Materials uploaded before this change have no stored file.
+> - Add GET /api/materials/:id/file that returns the stored PDF (Content-Type application/pdf) or 404.
+> - Source viewer: for a PDF material with a stored file, show the PDF in the browser's built-in viewer (iframe) opened at the page of the cited passage (#page=N from page_offsets), with a toggle "Text view" / "PDF view". For PDFs without a stored file and for TXT, SRT and VTT, keep the current text view with the highlighted passage, and for old PDFs show a short note that re-uploading enables the PDF view.
+> - Add data/files to .gitignore if data/ is not already ignored.
+> 
+> Add tests for storing, serving and deleting the file. Run npm test and npm run build, then check it in the browser.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** PDF uploads now keep the original file (FILES_DIR, by default a files folder next to DB_PATH), served by GET /api/materials/:id/file and deleted with the material, and the source viewer shows it in the browser's PDF viewer at the cited page with a Text view / PDF view toggle and a re-upload note for old PDFs (server/materials/files.js, server/index.js, client/src/views/SourceViewer.jsx, client/src/api.js, client/src/styles/viewer.css, .env.example, README.md). Added tests/pdf-files.test.js; also removed two test PDFs that the first test run wrote into data/files.
+
+**Type:** implementation
+
+**Git:** branch feature/pdf-original-view, changed files: 9
+
+**My changes and outcome:** 

@@ -9,6 +9,7 @@ import { EMBEDDING_UNREACHABLE_ERROR, PROVIDERS, getLlmModels, resolveLlm } from
 import { answerQuestion } from './rag/answer.js';
 import { DEFAULT_STYLE, NOTE_STYLES, getStyle } from './notes/styles.js';
 import { convertToText, pdfToTextWithPages } from './materials/convert.js';
+import { deletePdf, hasPdf, pdfPath, savePdf } from './materials/files.js';
 import {
   createMaterial,
   deleteMaterial,
@@ -198,6 +199,18 @@ app.post('/api/materials', upload.single('file'), async (req, res) => {
   }
 
   const id = createMaterial({ courseId, title, type, content, pageOffsets, outline });
+  // The original PDF is kept for the PDF view of the source viewer. Without it the material
+  // would silently lack that view, so a failed write removes the material and the upload fails.
+  if (type === 'pdf') {
+    try {
+      savePdf(id, file.buffer);
+    } catch (err) {
+      deleteMaterial(id);
+      deletePdf(id);
+      console.error(err);
+      throw httpError(500, 'The PDF file could not be saved.');
+    }
+  }
   enqueue('index', id);
   res.status(202).json({ id, status: 'processing' });
 });
@@ -205,7 +218,18 @@ app.post('/api/materials', upload.single('file'), async (req, res) => {
 app.get('/api/materials/:id', (req, res) => {
   const material = getMaterial(parseId(req.params.id, 'material id'));
   if (!material) throw httpError(404, 'Material not found.');
-  res.json(material);
+  res.json({ ...material, hasFile: material.type === 'pdf' && hasPdf(material.id) });
+});
+
+// The original PDF, shown inline by the browser's PDF viewer
+app.get('/api/materials/:id/file', (req, res) => {
+  const material = getMaterial(parseId(req.params.id, 'material id'));
+  if (!material || material.type !== 'pdf' || !hasPdf(material.id)) {
+    throw httpError(404, 'File not found.');
+  }
+  res.type('application/pdf');
+  res.setHeader('Content-Disposition', 'inline');
+  res.sendFile(pdfPath(material.id));
 });
 
 // Notes of all generated styles, in the order the styles are defined
@@ -275,9 +299,9 @@ app.delete('/api/materials/:id/notes/:style', (req, res) => {
 });
 
 app.delete('/api/materials/:id', (req, res) => {
-  if (!deleteMaterial(parseId(req.params.id, 'material id'))) {
-    throw httpError(404, 'Material not found.');
-  }
+  const id = parseId(req.params.id, 'material id');
+  if (!deleteMaterial(id)) throw httpError(404, 'Material not found.');
+  deletePdf(id);
   res.json({ deleted: true });
 });
 

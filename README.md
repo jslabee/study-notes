@@ -67,6 +67,7 @@ All configuration is read from `.env` in the project root. `.env` is ignored by 
 | `EMBED_DIM` | `1024` | Vector length of the embedding model (1024 for `bge-m3`). |
 | `PORT` | `3000` | Port of the Express server. |
 | `DB_PATH` | `data/app.db` | Path to the SQLite database file; the folder is created if missing. |
+| `FILES_DIR` | `data/files` | Folder for the original PDF files, named by material id. When unset, a `files` folder next to `DB_PATH`. |
 
 `EMBED_DIM` is fixed when the database is first created. If you switch to an embedding model with a different vector length, use a new `DB_PATH` (or delete the old database) and add the materials again.
 

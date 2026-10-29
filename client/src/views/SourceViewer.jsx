@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { getMaterial } from '../api.js'
+import { getMaterial, materialFileUrl } from '../api.js'
 import { formatCount, formatDate, parseTimestamp } from '../format.js'
 import ErrorState from '../components/ErrorState.jsx'
 import Icon from '../components/Icon.jsx'
@@ -17,11 +17,13 @@ function validPassage(passage, content) {
   return start >= 0 && end > start && end <= content.length ? passage : null
 }
 
-// Full text of one source in a reading view; the Workspace renders it with key={id}. With a
-// passage ({ start, end, page } from a citation) the cited text is highlighted and scrolled into view.
+// One source in a reading view; the Workspace renders it with key={id}. With a passage
+// ({ start, end, page } from a citation) the cited text is highlighted and scrolled into view.
+// A PDF with a stored file can also be shown in its original form, at the cited page.
 function SourceViewer({ id, passage = null, onBack }) {
   const [material, setMaterial] = useState(null)
   const [error, setError] = useState('')
+  const [view, setView] = useState('pdf')
   const backRef = useRef(null)
   const scrollRef = useRef(null)
   const passageRef = useRef(null)
@@ -58,17 +60,20 @@ function SourceViewer({ id, passage = null, onBack }) {
   }, [processing, load])
 
   const cited = validPassage(passage, material?.content)
+  const hasPdf = material?.type === 'pdf' && material.hasFile
+  const showPdf = hasPdf && view === 'pdf'
 
   // Scroll once, when the text first appears, so a later refresh does not move the reader
   useLayoutEffect(() => {
     const mark = passageRef.current
     const scroll = scrollRef.current
-    if (!mark || !scroll || scrolledRef.current) return
+    if (!mark || !scroll || scrolledRef.current || showPdf) return
     scrolledRef.current = true
     const offset = mark.getBoundingClientRect().top - scroll.getBoundingClientRect().top
     // A little of the text before the passage stays visible above it
     scroll.scrollTop += offset - scroll.clientHeight / 4
-  }, [cited])
+    // The text view of a PDF appears only when it is chosen, so the scroll waits for it
+  }, [cited, showPdf])
 
   const added = parseTimestamp(material?.createdAt)
 
@@ -79,11 +84,38 @@ function SourceViewer({ id, passage = null, onBack }) {
           <Icon name="back" size={16} />
           Back to workspace
         </button>
+        {hasPdf && (
+          <div className="segmented" role="radiogroup" aria-label="View">
+            {[
+              ['text', 'Text view'],
+              ['pdf', 'PDF view'],
+            ].map(([value, label]) => (
+              <label key={value} className="segmented-option">
+                <input
+                  type="radio"
+                  name={`viewer-${id}-view`}
+                  value={value}
+                  checked={view === value}
+                  onChange={() => setView(value)}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        )}
         {/* In the bar, so the page stays visible while the text is scrolled to the passage */}
         {cited?.page && <span className="viewer-page-number">Cited passage on p. {cited.page}</span>}
       </div>
 
-      <div className="viewer-scroll" ref={scrollRef}>
+      {showPdf && (
+        <iframe
+          className="viewer-pdf"
+          src={materialFileUrl(id, cited?.page)}
+          title={`${material.title} (PDF)`}
+        />
+      )}
+
+      <div className="viewer-scroll" ref={scrollRef} hidden={showPdf}>
         <article className="viewer-page" aria-busy={!material && !error}>
           {error && !material && <ErrorState message={error} onRetry={retry} />}
 
@@ -117,6 +149,12 @@ function SourceViewer({ id, passage = null, onBack }) {
                 {processing && (
                   <p className="viewer-notice">
                     This source is being processed. It can be used in questions when it is ready.
+                  </p>
+                )}
+                {material.type === 'pdf' && !material.hasFile && (
+                  <p className="viewer-notice viewer-notice-info">
+                    Only the text of this PDF is available. Upload it again to see it in its
+                    original form.
                   </p>
                 )}
                 {material.status === 'error' && (
