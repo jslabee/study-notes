@@ -1366,3 +1366,55 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch main, changed files: 15
 
 **My changes and outcome:** 
+
+### 29/10/2026, 23:58:30
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Add a theme setting to the client.
+> 
+> - A small control in the app header with three options: System, Light, Dark. Default is System (follows the operating system, as now).
+> - Light and Dark override the system setting. Apply the theme with a data-theme attribute on the root element and use the existing design tokens; add any missing light or dark values so every component looks correct in both themes.
+> - Remember the choice in localStorage (wrap reads and writes in try/catch) and apply it before the first render, so the page does not flash in the wrong theme on load.
+> - In System mode, react to the operating system changing its theme while the app is open.
+> - The control must be accessible: a label, keyboard support and visible focus.
+> 
+> Run npm run build and check every view (home, workspace with all three panels, source viewer, modals, toasts) in both themes.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** Added a System / Light / Dark theme control to the header that sets data-theme on the root element, is applied before the first render from localStorage, follows OS changes in System mode, and is keyboard accessible (client/index.html, client/src/theme.js, client/src/components/ThemeControl.jsx, TopBar.jsx, Icon.jsx, styles/tokens.css, styles/layout.css). Checked every view in both themes in headless Edge, including a contrast check.
+
+**Type:** implementation
+
+**Git:** branch feature/theme-setting, changed files: 8
+
+**My changes and outcome:** 
+
+### 30/10/2026, 00:11:43
+
+**Prompt:**
+
+> Simplify the theme control to two options: Light and Dark (remove System). On the first visit, when nothing is stored yet, start with the operating system's theme; after that, always use the stored choice. Keep it accessible and applied before the first render.
+> Run npm run build. Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+
+### 30/10/2026, 00:12:35
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>bpnpumtk0</task-id>
+> <tool-use-id>toolu_01EaBzsNsWp2aVGzqZoGngeL</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\bpnpumtk0.output</output-file>
+> <status>failed</status>
+> <summary>Background command "Start app server on port 3123 with the scratch database" failed with exit code 9</summary>
+> </task-notification>
+
+**Summary:** Simplified the theme control to Light and Dark: the first visit uses and stores the operating system's theme, then the stored choice always applies before the first render (client/src/theme.js, client/src/components/ThemeControl.jsx, client/src/components/Icon.jsx, comments in client/index.html and client/src/styles/tokens.css). Checked in headless Edge.
+
+**Type:** implementation
+
+**Git:** branch feature/theme-setting, changed files: 8
+
+**My changes and outcome:** 

@@ -95,6 +95,17 @@ button.topbar-brand:hover {
   background: var(--color-danger);
 }
 
+/* Theme: icon-only options; the label of each is in the option and its tooltip */
+.theme-control {
+  flex: none;
+}
+
+.theme-control .segmented-option > span {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px var(--space-2);
+}
+
 /* On phones only the status dot is shown, so the course name has room */
 @media (max-width: 600px) {
   .topbar {

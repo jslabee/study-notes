@@ -1,8 +1,9 @@
 import Icon from './Icon.jsx'
+import ThemeControl from './ThemeControl.jsx'
 
 const SERVER_LABELS = { null: 'Checking server...', true: 'Server online', false: 'Server offline' }
 
-// App name, the open course as a breadcrumb, the server status and the settings button
+// App name, the open course as a breadcrumb, the server status, the theme and the settings button
 function TopBar({ courseName, onHome, serverOnline, onOpenSettings }) {
   return (
     <header className="topbar">
@@ -33,6 +34,7 @@ function TopBar({ courseName, onHome, serverOnline, onOpenSettings }) {
         <span className="server-status-dot" aria-hidden="true" />
         <span className="server-status-label">{SERVER_LABELS[serverOnline]}</span>
       </span>
+      <ThemeControl />
       <button
         type="button"
         className="icon-btn"
