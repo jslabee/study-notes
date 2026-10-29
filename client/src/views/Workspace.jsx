@@ -33,6 +33,8 @@ function Workspace({ course }) {
   const [unchecked, setUnchecked] = useState(() => new Set())
   const [notesId, setNotesId] = useState(null)
   const [viewingId, setViewingId] = useState(null)
+  // The cited passage ({ start, end, page }) the viewer opens at, or null for the top of the text
+  const [viewingPassage, setViewingPassage] = useState(null)
   const [adding, setAdding] = useState(false)
   const [deleting, setDeleting] = useState(null)
 
@@ -227,6 +229,16 @@ function Workspace({ course }) {
     )
   }
 
+  // A citation passes its source, so the viewer opens at the cited passage when it was located
+  function openSource(id, source = null) {
+    setViewingPassage(
+      Number.isInteger(source?.start) && Number.isInteger(source?.end)
+        ? { start: source.start, end: source.end, page: source.page ?? null }
+        : null
+    )
+    setViewingId(id)
+  }
+
   const readyTitles = (materials ?? [])
     .filter((m) => m.status === 'ready' && isChecked(m.id))
     .map((m) => m.title)
@@ -263,7 +275,7 @@ function Workspace({ course }) {
             onClear={() => setUnchecked(new Set((materials ?? []).map((m) => m.id)))}
             selectedId={notesMaterial?.id}
             onSelect={selectForNotes}
-            onOpen={setViewingId}
+            onOpen={openSource}
             onDelete={setDeleting}
             onAdd={() => setAdding(true)}
             panelProps={panelProps('sources', 'left')}
@@ -274,7 +286,7 @@ function Workspace({ course }) {
             searching={searching}
             onSend={askQuestion}
             onRetry={retry}
-            onOpenSource={setViewingId}
+            onOpenSource={openSource}
             onAddSource={() => setAdding(true)}
             selectedCount={checkedIds.length}
             totalCount={materials?.length ?? 0}
@@ -285,7 +297,7 @@ function Workspace({ course }) {
           <NotesPanel
             key={notesMaterial?.id ?? 'none'}
             material={notesMaterial}
-            onOpenSource={setViewingId}
+            onOpenSource={openSource}
             expanded={expanded}
             onToggleExpand={narrow ? undefined : () => setNotesExpanded((current) => !current)}
             panelProps={panelProps('notes', 'right')}
@@ -294,7 +306,12 @@ function Workspace({ course }) {
       </div>
 
       {viewingId !== null && (
-        <SourceViewer key={viewingId} id={viewingId} onBack={() => setViewingId(null)} />
+        <SourceViewer
+          key={viewingId}
+          id={viewingId}
+          passage={viewingPassage}
+          onBack={() => setViewingId(null)}
+        />
       )}
 
       {adding && (

@@ -143,7 +143,7 @@ function CitationChip({ source, onOpenSource }) {
                 className="link-btn"
                 onClick={() => {
                   close({ focusChip: false })
-                  onOpenSource(source.materialId)
+                  onOpenSource(source.materialId, source)
                 }}
               >
                 <Icon name="open" size={14} />

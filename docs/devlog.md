@@ -1311,3 +1311,58 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch fix/search-filter, changed files: 9
 
 **My changes and outcome:** 
+
+### 29/10/2026, 21:41:41
+
+**Prompt:**
+
+> The workspace already fits on one page, but the browser window still shows a scrollbar and the page can scroll a little. Remove the window scroll: the app must fit exactly in the browser window (html, body and the root element at 100% height, no overflow), with scrolling only inside the panels. Find what makes the page taller than the window (for example a margin, padding or a 100vh element plus the header) and fix that instead of hiding a problem. Keep the resizable dividers and the narrow-screen tabs working.
+> Run npm run build and check it in the browser.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+
+**Summary:** Removed the window scroll by making the scrolling areas the positioning parent for screen-reader-only labels, which had been placed relative to the page and pushed it past the window in long chats and lists (client/src/styles/workspace.css, chat.css, notes.css, home.css, viewer.css, base.css); checked in headless Edge at several sizes and scales, including dividers and narrow tabs.
+
+**Type:** bugfix
+
+**Git:** branch main, changed files: 7
+
+**My changes and outcome:** 
+
+### 29/10/2026, 21:48:22
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Clicking "Open source" in a citation popover opens the source viewer at the top of the material. It must open the source viewer scrolled to the cited passage instead:
+> 
+> - Scroll to the cited chunk and highlight it, so it is clearly visible.
+> - For PDF materials, show the page number of the cited passage (use the stored page_offsets).
+> - The back button returns to the workspace with the chat as it was.
+> - If the source viewer needs the chunk's position in the material text, add it to the sources returned by POST /api/ask (keep the existing fields).
+> 
+> This worked before but was lost with a git reset; check git log for earlier work on it.
+> Add tests for any server change. Run npm test and npm run build, then check it in the browser with a TXT and a PDF material.
+> Do not modify docs/spec.md, docs/devlog.md or .claude/. Do not run git commit, merge or push.
+> </pasted_content id="7e18">
+
+**Summary:** Server part of opening a cited passage: new server/rag/passage.js locates each cited chunk in its material text and its PDF page, and POST /api/ask sources now include start, end and page (server/rag/answer.js); tests in tests/passage.test.js plus updated tests/ask-api.test.js and tests/rag.test.js. The client viewer changes, build and browser check are not done yet because the usage limit was reached.
+
+**Type:** implementation
+
+**Git:** branch main, changed files: 12
+
+**My changes and outcome:** 
+
+### 29/10/2026, 22:51:51
+
+**Prompt:**
+
+> Your claude.ai usage limit has reset. Continue the task you were working on when the limit was reached; do not repeat work that is already complete.
+
+**Summary:** Opening a source from a citation now scrolls the viewer to the cited chunk and highlights it, shows the PDF page, and Back keeps the chat as it was; /api/ask sources gained start, end and page (server/rag/passage.js, server/rag/answer.js, client CitationChip.jsx, Workspace.jsx, SourceViewer.jsx, viewer.css). Added tests/passage.test.js, updated tests/ask-api.test.js and tests/rag.test.js, and checked with real TXT and PDF questions in the browser.
+
+**Type:** implementation
+
+**Git:** branch main, changed files: 15
+
+**My changes and outcome:** 

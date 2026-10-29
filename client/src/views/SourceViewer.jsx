@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { getMaterial } from '../api.js'
 import { formatCount, formatDate, parseTimestamp } from '../format.js'
 import ErrorState from '../components/ErrorState.jsx'
@@ -10,11 +10,22 @@ import TypeIcon from '../components/TypeIcon.jsx'
 const REFRESH_MS = 3000
 const TYPE_LABELS = { text: 'Pasted text', txt: 'TXT', srt: 'SRT', vtt: 'VTT', pdf: 'PDF' }
 
-// Full text of one source in a reading view; the Workspace renders it with key={id}
-function SourceViewer({ id, onBack }) {
+// The passage when its offsets fit the text, otherwise null (the viewer then opens at the top)
+function validPassage(passage, content) {
+  if (!passage || typeof content !== 'string') return null
+  const { start, end } = passage
+  return start >= 0 && end > start && end <= content.length ? passage : null
+}
+
+// Full text of one source in a reading view; the Workspace renders it with key={id}. With a
+// passage ({ start, end, page } from a citation) the cited text is highlighted and scrolled into view.
+function SourceViewer({ id, passage = null, onBack }) {
   const [material, setMaterial] = useState(null)
   const [error, setError] = useState('')
   const backRef = useRef(null)
+  const scrollRef = useRef(null)
+  const passageRef = useRef(null)
+  const scrolledRef = useRef(false)
 
   const load = useCallback(async () => {
     try {
@@ -46,6 +57,19 @@ function SourceViewer({ id, onBack }) {
     return () => clearInterval(timer)
   }, [processing, load])
 
+  const cited = validPassage(passage, material?.content)
+
+  // Scroll once, when the text first appears, so a later refresh does not move the reader
+  useLayoutEffect(() => {
+    const mark = passageRef.current
+    const scroll = scrollRef.current
+    if (!mark || !scroll || scrolledRef.current) return
+    scrolledRef.current = true
+    const offset = mark.getBoundingClientRect().top - scroll.getBoundingClientRect().top
+    // A little of the text before the passage stays visible above it
+    scroll.scrollTop += offset - scroll.clientHeight / 4
+  }, [cited])
+
   const added = parseTimestamp(material?.createdAt)
 
   return (
@@ -55,9 +79,11 @@ function SourceViewer({ id, onBack }) {
           <Icon name="back" size={16} />
           Back to workspace
         </button>
+        {/* In the bar, so the page stays visible while the text is scrolled to the passage */}
+        {cited?.page && <span className="viewer-page-number">Cited passage on p. {cited.page}</span>}
       </div>
 
-      <div className="viewer-scroll">
+      <div className="viewer-scroll" ref={scrollRef}>
         <article className="viewer-page" aria-busy={!material && !error}>
           {error && !material && <ErrorState message={error} onRetry={retry} />}
 
@@ -99,7 +125,19 @@ function SourceViewer({ id, onBack }) {
                   </p>
                 )}
               </header>
-              <div className="viewer-text">{material.content}</div>
+              <div className="viewer-text">
+                {cited ? (
+                  <>
+                    {material.content.slice(0, cited.start)}
+                    <mark ref={passageRef} className="viewer-passage" aria-label="Cited passage">
+                      {material.content.slice(cited.start, cited.end)}
+                    </mark>
+                    {material.content.slice(cited.end)}
+                  </>
+                ) : (
+                  material.content
+                )}
+              </div>
             </>
           )}
         </article>

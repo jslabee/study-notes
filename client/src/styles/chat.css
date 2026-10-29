@@ -1,5 +1,6 @@
 /* Chat panel: messages, citation chips and the composer fixed at the bottom */
 .chat-scroll {
+  position: relative;
   flex: 1;
   min-height: 0;
   padding: var(--space-4);

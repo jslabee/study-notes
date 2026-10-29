@@ -53,6 +53,9 @@ select {
   outline-offset: 2px;
 }
 
+/* Scrolling areas (.panel-body, .chat-scroll, ...) are positioned, so a hidden label is placed and
+   clipped inside the area that scrolls it; otherwise it is placed on the page and labels further
+   down a long list would make the whole window scroll */
 .visually-hidden {
   position: absolute;
   width: 1px;

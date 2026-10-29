@@ -1,4 +1,5 @@
 import { chat as llmChat, resolveLlm } from '../llm.js';
+import { withPositions } from './passage.js';
 import { searchChunks } from './search.js';
 
 // Prompt is copied verbatim from docs/spec.md ("Iskanje (RAG)")
@@ -22,12 +23,17 @@ export async function answerQuestion(
 ) {
   const chunks = await searchChunks(question, { courseId, materialIds, embed });
 
-  const sources = chunks.map((chunk, i) => ({
+  // start and end (offsets in the material text) and page (PDFs) let the source viewer open
+  // at the cited passage
+  const sources = withPositions(chunks).map((chunk, i) => ({
     n: i + 1,
     materialId: chunk.materialId,
     title: chunk.title,
     chunkId: chunk.chunkId,
     text: chunk.text,
+    start: chunk.start,
+    end: chunk.end,
+    page: chunk.page,
   }));
 
   // Without any excerpts there is nothing to answer from, so no model is called

@@ -270,8 +270,8 @@ test('answerQuestion calls the model and returns the answer with numbered source
     provider: 'local',
     model: 'gemma3:4b',
     sources: [
-      { n: 1, materialId: material, title: 'Energy', chunkId: first, text: 'ATP stores energy.' },
-      { n: 2, materialId: material, title: 'Energy', chunkId: second, text: 'Cells use ATP.' },
+      { n: 1, materialId: material, title: 'Energy', chunkId: first, text: 'ATP stores energy.', start: null, end: null, page: null },
+      { n: 2, materialId: material, title: 'Energy', chunkId: second, text: 'Cells use ATP.', start: null, end: null, page: null },
     ],
   });
 });

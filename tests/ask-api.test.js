@@ -78,7 +78,7 @@ test('POST /api/ask returns { answer, sources } in the specified shape', async (
   assert.equal(body.model, 'test-model');
   assert.equal(body.sources.length, 2);
   body.sources.forEach((source, i) => {
-    assert.deepEqual(Object.keys(source).sort(), ['chunkId', 'materialId', 'n', 'text', 'title']);
+    assert.deepEqual(Object.keys(source).sort(), ['chunkId', 'end', 'materialId', 'n', 'page', 'start', 'text', 'title']);
     assert.equal(source.n, i + 1);
   });
   assert.deepEqual(body.sources.map((s) => s.title).sort(), ['Photosynthesis', 'Rome']);
