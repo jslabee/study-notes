@@ -38,10 +38,17 @@ after(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-test('GET notes returns 404 before notes are generated', async () => {
-  const res = await fetch(`${baseUrl}/api/materials/${materialId}/notes`);
+test('before notes are generated the list is empty and one style returns 404', async () => {
+  let res = await fetch(`${baseUrl}/api/materials/${materialId}/notes`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), []);
+
+  res = await fetch(`${baseUrl}/api/materials/${materialId}/notes/study-notes`);
   assert.equal(res.status, 404);
-  assert.equal(typeof (await res.json()).error, 'string');
+  assert.deepEqual(await res.json(), { error: 'Notes not found.' });
+
+  res = await fetch(`${baseUrl}/api/materials/9999/notes`);
+  assert.equal(res.status, 404);
 });
 
 test('POST notes for an unknown material returns 404', async () => {
@@ -52,12 +59,15 @@ test('POST notes for an unknown material returns 404', async () => {
 test('POST notes starts a job; a failure is saved in the error field', async () => {
   const res = await fetch(`${baseUrl}/api/materials/${materialId}/notes`, { method: 'POST' });
   assert.equal(res.status, 202);
-  assert.deepEqual(await res.json(), { status: 'processing' });
+  assert.deepEqual(await res.json(), { style: 'study-notes', status: 'processing' });
 
   await whenIdle();
 
-  const notes = await (await fetch(`${baseUrl}/api/materials/${materialId}/notes`)).json();
-  assert.deepEqual(Object.keys(notes).sort(), ['content', 'createdAt', 'error', 'model', 'status']);
+  const list = await (await fetch(`${baseUrl}/api/materials/${materialId}/notes`)).json();
+  assert.equal(list.length, 1);
+  const notes = list[0];
+  assert.deepEqual(Object.keys(notes).sort(), ['content', 'createdAt', 'error', 'model', 'status', 'style']);
+  assert.equal(notes.style, 'study-notes');
   assert.equal(notes.status, 'error');
   assert.equal(notes.error, 'OpenAI API key is missing. Set OPENAI_API_KEY in .env.');
 });

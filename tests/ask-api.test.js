@@ -70,8 +70,11 @@ test('POST /api/ask returns { answer, sources } in the specified shape', async (
   assert.equal(res.status, 200);
   const body = await res.json();
 
-  assert.deepEqual(Object.keys(body).sort(), ['answer', 'sources']);
+  assert.deepEqual(Object.keys(body).sort(), ['answer', 'model', 'provider', 'sources']);
   assert.equal(body.answer, 'Plants use light [1].');
+  // The fake Ollama has no chat model installed, so auto uses OpenAI
+  assert.equal(body.provider, 'openai');
+  assert.equal(body.model, 'test-model');
   assert.equal(body.sources.length, 2);
   body.sources.forEach((source, i) => {
     assert.deepEqual(Object.keys(source).sort(), ['chunkId', 'materialId', 'n', 'text', 'title']);
@@ -135,7 +138,12 @@ test('unknown or invalid materialIds are rejected with a clear message', async (
 test('a course without materials gives the not-found answer without calling OpenAI', async () => {
   fakeOpenAI.requests.length = 0;
   const body = await (await ask({ question: 'Anything?', courseId: emptyCourse })).json();
-  assert.deepEqual(body, { answer: 'I could not find the answer in the materials.', sources: [] });
+  assert.deepEqual(body, {
+    answer: 'I could not find the answer in the materials.',
+    sources: [],
+    provider: null,
+    model: null,
+  });
   assert.equal(fakeOpenAI.requests.length, 0);
 });
 

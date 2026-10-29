@@ -1,5 +1,5 @@
 import { getDb } from './db.js';
-import { getModel } from './llm.js';
+import { resolveLlm } from './llm.js';
 import { generateNotes } from './notes/generate.js';
 import { indexMaterial } from './rag/index.js';
 
@@ -9,19 +9,24 @@ let idleWaiters = [];
 
 const handlers = {
   index: (materialId) => indexMaterial(materialId),
-  notes: async (materialId) => {
-    const material = getDb()
-      .prepare('SELECT title, content FROM materials WHERE id = ?')
-      .get(materialId);
-    if (!material) return;
-
-    const model = getModel();
-    const content = await generateNotes(material);
-    getDb()
+  // Notes jobs use the id of the notes row, so each style of a material is its own job.
+  // llm is the provider and model resolved for the request; restored jobs use the defaults.
+  notes: async (notesId, llm) => {
+    const row = getDb()
       .prepare(
-        "UPDATE notes SET content = ?, model = ?, status = 'ready', error = NULL WHERE material_id = ?"
+        `SELECT n.style, m.title, m.content FROM notes n
+         JOIN materials m ON m.id = n.material_id
+         WHERE n.id = ? AND n.status = 'processing'`
       )
-      .run(content, model, materialId);
+      .get(notesId);
+    // Deleted (or no longer waiting) before the job started
+    if (!row) return;
+
+    const used = llm ?? (await resolveLlm({ textLength: row.content.length }));
+    const content = await generateNotes(row, { style: row.style, ...used });
+    getDb()
+      .prepare("UPDATE notes SET content = ?, model = ?, status = 'ready', error = NULL WHERE id = ?")
+      .run(content, `${used.provider}:${used.model}`, notesId);
   },
 };
 
@@ -31,18 +36,16 @@ const failHandlers = {
       .prepare("UPDATE materials SET status = 'error', error = ? WHERE id = ?")
       .run(message, materialId);
   },
-  notes: (materialId, message) => {
-    getDb()
-      .prepare("UPDATE notes SET status = 'error', error = ? WHERE material_id = ?")
-      .run(message, materialId);
+  notes: (notesId, message) => {
+    getDb().prepare("UPDATE notes SET status = 'error', error = ? WHERE id = ?").run(message, notesId);
   },
 };
 
 // Adds a job to the queue; jobs run one after another in the background
-export function enqueue(type, id) {
+export function enqueue(type, id, options) {
   if (!handlers[type]) throw new Error(`Unknown job type: ${type}`);
   if (queue.some((job) => job.type === type && job.id === id)) return;
-  queue.push({ type, id });
+  queue.push({ type, id, options });
   if (!running) setImmediate(runNext);
 }
 
@@ -57,7 +60,7 @@ async function runNext() {
 
   running = true;
   try {
-    await handlers[job.type](job.id);
+    await handlers[job.type](job.id, job.options);
   } catch (err) {
     console.error(`Job ${job.type} ${job.id} failed:`, err);
     try {
@@ -80,7 +83,7 @@ export function restoreJobs() {
   for (const row of materials) enqueue('index', row.id);
 
   const notes = db
-    .prepare("SELECT material_id AS id FROM notes WHERE status = 'processing' ORDER BY id")
+    .prepare("SELECT id FROM notes WHERE status = 'processing' ORDER BY id")
     .all();
   for (const row of notes) enqueue('notes', row.id);
 }

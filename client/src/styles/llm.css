@@ -1,0 +1,169 @@
+/* Provider and model picker */
+.llm-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.segmented {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+}
+
+.segmented-option {
+  position: relative;
+  display: inline-flex;
+}
+
+.segmented-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.segmented-option span {
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.segmented-option:hover input:not(:disabled) + span {
+  color: var(--color-text);
+}
+
+.segmented-option input:checked + span {
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
+.segmented-option input:focus-visible + span {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
+.segmented-option input:disabled + span {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.select {
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+}
+
+.select-small {
+  flex: 1 1 140px;
+  max-width: 260px;
+  min-height: 28px;
+  padding: 2px var(--space-2);
+  font-size: var(--font-size-xs);
+}
+
+.select:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 0;
+}
+
+.llm-picker-warning {
+  flex-basis: 100%;
+  color: var(--color-warning);
+}
+
+/* Shows "<provider>:<model>" under notes and answers */
+.badge-model {
+  background: var(--color-surface-3);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-weight: normal;
+}
+
+.bubble .badge-model {
+  margin-top: var(--space-1);
+}
+
+/* Chat input: the picker is the second row inside the input box */
+.chat-input-wrap {
+  flex-wrap: wrap;
+}
+
+.chat-llm {
+  flex-basis: 100%;
+  padding: var(--space-1) 0 0;
+  border-top: 1px solid var(--color-border);
+}
+
+/* Settings dialog */
+.settings-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.settings-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-list dt {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.settings-list dd {
+  margin: 0;
+  text-align: right;
+  font-size: var(--font-size-sm);
+}
+
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.settings-check .checkbox:disabled {
+  cursor: default;
+}
+
+.settings-heading {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+}
+
+.settings-models {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--font-size-sm);
+}
+
+.settings-models li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}

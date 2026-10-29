@@ -1,4 +1,4 @@
-import { complete as llmComplete } from '../llm.js';
+import { chat as llmChat, resolveLlm } from '../llm.js';
 import { searchChunks } from './search.js';
 
 // Prompt is copied verbatim from docs/spec.md ("Iskanje (RAG)")
@@ -14,10 +14,11 @@ export function answerMessage(question, chunks) {
   return `Excerpts:\n${excerpts}\n\nQuestion: ${question}`;
 }
 
-// Answers a question from the most similar chunks; complete and embed are replaceable for tests
+// Answers a question from the most similar chunks with the requested provider and model;
+// chat, resolve and embed are replaceable for tests
 export async function answerQuestion(
   question,
-  { courseId, materialIds, complete = llmComplete, embed } = {}
+  { courseId, materialIds, provider, model, chat = llmChat, resolve = resolveLlm, embed } = {}
 ) {
   const chunks = await searchChunks(question, { courseId, materialIds, embed });
 
@@ -29,13 +30,18 @@ export async function answerQuestion(
     text: chunk.text,
   }));
 
-  // Without any excerpts there is nothing to answer from, so the model is not called
-  if (chunks.length === 0) return { answer: NOT_FOUND_ANSWER, sources };
+  // Without any excerpts there is nothing to answer from, so no model is called
+  if (chunks.length === 0) {
+    return { answer: NOT_FOUND_ANSWER, sources, provider: null, model: null };
+  }
 
-  const answer = await complete({
+  const user = answerMessage(question, chunks);
+  const llm = await resolve({ provider, model, textLength: ANSWER_SYSTEM_PROMPT.length + user.length });
+  const reply = await chat({
+    ...llm,
     system: ANSWER_SYSTEM_PROMPT,
-    user: answerMessage(question, chunks),
+    user,
     maxOutputTokens: MAX_OUTPUT_TOKENS,
   });
-  return { answer: answer.trim(), sources };
+  return { answer: reply.text.trim(), sources, provider: reply.provider, model: reply.model };
 }

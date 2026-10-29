@@ -6,12 +6,19 @@ import { withRetries } from '../server/llm.js';
 import {
   GROUP_SIZE,
   MAX_PART_CHARS,
-  MERGE_SYSTEM_PROMPT,
-  NOTES_SYSTEM_PROMPT,
   generateNotes,
   reduceNotes,
   splitText,
 } from '../server/notes/generate.js';
+import {
+  MERGE_INSTRUCTION,
+  NOTES_SYSTEM_PROMPT,
+  NOTE_STYLES,
+  getStyle,
+  mergePrompt,
+} from '../server/notes/styles.js';
+
+const MERGE_SYSTEM_PROMPT = mergePrompt(getStyle('study-notes'));
 
 const words = (text) => text.split(/\s+/).filter(Boolean);
 
@@ -29,14 +36,15 @@ function makeText(totalChars, paragraphChars = 1000) {
   return paragraphs.join('\n\n');
 }
 
-// Mock for llm.complete that records every call
-function mockComplete() {
+// Mock for llm.chat that records every call
+function mockChat() {
   const calls = [];
-  const complete = async ({ system, user, maxOutputTokens }) => {
-    calls.push({ system, user, maxOutputTokens });
-    return system === NOTES_SYSTEM_PROMPT ? `notes ${calls.length}` : `merged ${calls.length}`;
+  const chat = async ({ provider, model, system, user, maxOutputTokens }) => {
+    calls.push({ provider, model, system, user, maxOutputTokens });
+    const text = system === NOTES_SYSTEM_PROMPT ? `notes ${calls.length}` : `merged ${calls.length}`;
+    return { text, provider, model };
   };
-  return { calls, complete };
+  return { calls, chat };
 }
 
 test('text of at most 60,000 characters is one unchanged part', () => {
@@ -112,8 +120,8 @@ test('a book of about 40 parts is merged in two levels', async () => {
 });
 
 test('short material: one call with the exact notes prompt and no part line', async () => {
-  const { calls, complete } = mockComplete();
-  const result = await generateNotes({ title: 'Cells', content: 'Cells are small.' }, { complete });
+  const { calls, chat } = mockChat();
+  const result = await generateNotes({ title: 'Cells', content: 'Cells are small.' }, { chat });
   assert.equal(result, 'notes 1');
   assert.equal(calls.length, 1);
   assert.equal(calls[0].system, NOTES_SYSTEM_PROMPT);
@@ -125,12 +133,12 @@ test('short material: one call with the exact notes prompt and no part line', as
 });
 
 test('long material: part notes with part lines, then merges with the merge prompt', async () => {
-  const { calls, complete } = mockComplete();
+  const { calls, chat } = mockChat();
   const content = makeText(12 * MAX_PART_CHARS);
   const partCount = splitText(content).length;
   assert.ok(partCount > 10);
 
-  await generateNotes({ title: 'Big book', content }, { complete });
+  await generateNotes({ title: 'Big book', content }, { chat });
 
   const partCalls = calls.filter((c) => c.system === NOTES_SYSTEM_PROMPT);
   const mergeCalls = calls.filter((c) => c.system === MERGE_SYSTEM_PROMPT);
@@ -143,11 +151,94 @@ test('long material: part notes with part lines, then merges with the merge prom
   for (const call of calls) assert.equal(call.maxOutputTokens, 4000);
 });
 
+test('the local provider splits into parts of LOCAL_PART_CHARS and passes the model on', async () => {
+  process.env.LOCAL_PART_CHARS = '15000';
+  const { calls, chat } = mockChat();
+  const content = makeText(MAX_PART_CHARS);
+  assert.equal(splitText(content).length, 2);
+
+  await generateNotes({ title: 'Book', content }, { provider: 'local', model: 'gemma3:4b', chat });
+
+  const partCalls = calls.filter((c) => c.system === NOTES_SYSTEM_PROMPT);
+  assert.equal(partCalls.length, splitText(content, 15000).length);
+  assert.ok(partCalls.length >= 4);
+  for (const call of partCalls) {
+    assert.ok(call.user.length < 15000 + 200);
+  }
+  for (const call of calls) assert.deepEqual([call.provider, call.model], ['local', 'gemma3:4b']);
+});
+
+test('the OpenAI provider keeps parts of 60,000 characters', async () => {
+  process.env.LOCAL_PART_CHARS = '15000';
+  const { calls, chat } = mockChat();
+  const content = makeText(MAX_PART_CHARS);
+  await generateNotes({ title: 'Book', content }, { provider: 'openai', model: 'gpt-5-mini', chat });
+  assert.equal(calls.filter((c) => c.system === NOTES_SYSTEM_PROMPT).length, 2);
+});
+
 test('prompts match the specification verbatim', () => {
   const spec = fs.readFileSync(new URL('../docs/spec.md', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const blocks = [...spec.matchAll(/```text\n([\s\S]*?)\n```/g)].map((m) => m[1]);
-  assert.ok(blocks.includes(NOTES_SYSTEM_PROMPT), 'notes prompt differs from docs/spec.md');
-  assert.ok(blocks.includes(MERGE_SYSTEM_PROMPT), 'merge prompt differs from docs/spec.md');
+  for (const style of NOTE_STYLES) {
+    assert.ok(blocks.includes(style.prompt), `${style.id} prompt differs from docs/spec.md`);
+  }
+  assert.ok(blocks.includes(MERGE_INSTRUCTION), 'merge instruction differs from docs/spec.md');
+  assert.equal(getStyle('study-notes').prompt, NOTES_SYSTEM_PROMPT);
+});
+
+test('the six styles are defined with names and descriptions', () => {
+  assert.deepEqual(
+    NOTE_STYLES.map((s) => s.id),
+    ['study-notes', 'brief', 'outline', 'cheat-sheet', 'lecture-guide', 'simple']
+  );
+  for (const style of NOTE_STYLES) {
+    assert.ok(style.name && style.description && style.prompt);
+  }
+  assert.equal(new Set(NOTE_STYLES.map((s) => s.prompt)).size, NOTE_STYLES.length);
+});
+
+test('each style uses its own prompt for a short material', async () => {
+  for (const style of NOTE_STYLES) {
+    const { calls, chat } = mockChat();
+    await generateNotes({ title: 'Cells', content: 'Cells are small.' }, { style: style.id, chat });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].system, style.prompt);
+    assert.equal(calls[0].user, 'Material title: Cells\n\n<material>\nCells are small.\n</material>');
+  }
+});
+
+test('long material in a style: parts use the style prompt, merges insert it into the merge instruction', async () => {
+  const outline = getStyle('outline');
+  const merge = mergePrompt(outline);
+  assert.ok(merge.startsWith('Below are partial results for individual parts'));
+  assert.ok(merge.endsWith(`Instructions:\n${outline.prompt}`));
+  assert.ok(!merge.includes('{style instructions}'));
+
+  const calls = [];
+  const chat = async ({ system, user }) => {
+    calls.push({ system, user });
+    return { text: system === outline.prompt ? `part ${calls.length}` : `merged ${calls.length}` };
+  };
+  const content = makeText(12 * MAX_PART_CHARS);
+  const partCount = splitText(content).length;
+  await generateNotes({ title: 'Big book', content }, { style: 'outline', chat });
+
+  const partCalls = calls.filter((c) => c.system === outline.prompt);
+  const mergeCalls = calls.filter((c) => c.system === merge);
+  assert.equal(partCalls.length, partCount);
+  assert.equal(mergeCalls.length, Math.ceil(partCount / 10) + 1);
+  assert.equal(partCalls.length + mergeCalls.length, calls.length);
+  partCalls.forEach((call, i) => {
+    assert.ok(call.user.includes(`This is part ${i + 1} of ${partCount}.\n`));
+  });
+});
+
+test('an unknown style is rejected before any model call', async () => {
+  const chat = async () => assert.fail('model must not be called');
+  await assert.rejects(
+    generateNotes({ title: 'x', content: 'y' }, { style: 'poem', chat }),
+    /Unknown note style "poem"/
+  );
 });
 
 test('transient OpenAI errors are retried at most three times', async () => {
