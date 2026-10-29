@@ -1,5 +1,6 @@
 // Note styles: the instructions are copied verbatim from docs/spec.md ("Zapiski" for
-// study-notes and "Nadgradnja 5 – Slogi povzetkov" for the others and the merge instruction)
+// study-notes, "Nadgradnja 5 – Slogi povzetkov" for the others and the merge instruction, and
+// "Nadgradnja 6 – Povzetek po poglavjih (slog by-chapter)" for the by-chapter instructions)
 
 export const NOTES_SYSTEM_PROMPT = `You are an assistant that creates study notes from learning material. Use only information from the material; do not add or invent anything. Respond only with the notes in Markdown, in exactly this structure:
 
@@ -80,6 +81,44 @@ technical term is necessary, explain it in brackets.
 One short example from the material that illustrates the main idea; if the material
 has no example, omit this section.`;
 
+// by-chapter: chapters are found in the PDF outline, by the model among candidate heading lines
+// (CANDIDATES_PROMPT) or by topic segmentation with a short title for each section
+// (SECTION_TITLE_PROMPT). Each chapter is summarized with CHAPTER_PROMPT ({chapter title} is
+// replaced with the chapter's title), then OVERVIEW_PROMPT writes the overview from all chapter
+// summaries.
+export const CANDIDATES_PROMPT = `You receive candidate heading lines from a long document, in document order. Each
+line has an id and the number of words that follow it until the next candidate.
+Identify the lines that start the main chapters of the document: top-level chapters
+only, not subsections, not table of contents entries, not running page headers or
+footers. Respond only with JSON in document order:
+{"chapters":[{"id": <id>, "title": "<clean chapter title>"}]}
+If the document has no chapters, respond {"chapters":[]}.`;
+
+export const SECTION_TITLE_PROMPT = `Give a short title (at most 8 words) for this section of learning material. Use only
+information from the section. Respond with the title only.`;
+
+export const CHAPTER_PROMPT = `You are an assistant that summarizes one chapter of a book or long learning material.
+Use only information from the chapter; do not add or invent anything. Respond only in
+Markdown with exactly this structure:
+
+## {chapter title}
+A paragraph of 3 to 6 sentences describing what the chapter covers and its main
+conclusions.
+
+**Key points**
+3 to 8 bullet points with the most important ideas of the chapter.`;
+
+export const OVERVIEW_PROMPT = `Below are summaries of all chapters of the same material, in order. Write an overview
+of the whole material. Use only information from the summaries; do not add anything.
+Respond only in Markdown with exactly this structure:
+
+## Overview
+A paragraph of 4 to 8 sentences describing what the whole material covers and how the
+chapters build on each other.
+
+## Chapters at a glance
+A numbered list with one sentence per chapter: **chapter title** – what it covers.`;
+
 // Used for all styles; {style instructions} is replaced with the style's prompt
 export const MERGE_INSTRUCTION = `Below are partial results for individual parts of the same material, all created with
 the instructions shown at the end. Merge them into a single result that follows the
@@ -90,6 +129,7 @@ Instructions:
 {style instructions}`;
 
 export const DEFAULT_STYLE = 'study-notes';
+export const CHAPTER_STYLE = 'by-chapter';
 
 export const NOTE_STYLES = [
   {
@@ -128,10 +168,22 @@ export const NOTE_STYLES = [
     description: 'Plain-language explanation for beginners, with an example.',
     prompt: SIMPLE_PROMPT,
   },
+  {
+    id: CHAPTER_STYLE,
+    name: 'By chapter',
+    description: 'Overview and a summary of each chapter or section (books, long scripts, lectures)',
+    // The prompt for one chapter; the overview has its own prompt (OVERVIEW_PROMPT)
+    prompt: CHAPTER_PROMPT,
+  },
 ];
 
 export function getStyle(id) {
   return NOTE_STYLES.find((style) => style.id === id) ?? null;
+}
+
+export function chapterPrompt(title) {
+  // A function, so "$" in a title is never read as a replacement pattern
+  return CHAPTER_PROMPT.replace('{chapter title}', () => title);
 }
 
 export function mergePrompt(style) {

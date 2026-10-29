@@ -71,7 +71,11 @@ after(() => {
 });
 
 test('migration keeps all existing materials unchanged', () => {
-  assert.deepEqual(db.prepare('SELECT * FROM materials ORDER BY id').all(), before);
+  // The only change is the new, empty PDF columns
+  assert.deepEqual(
+    db.prepare('SELECT * FROM materials ORDER BY id').all(),
+    before.map((material) => ({ ...material, page_offsets: null, outline: null }))
+  );
   assert.equal(db.prepare('SELECT count(*) AS n FROM notes').get().n, 1);
   assert.equal(db.prepare('SELECT count(*) AS n FROM chunks').get().n, 1);
 });

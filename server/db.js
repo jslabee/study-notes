@@ -12,7 +12,9 @@ const MATERIALS_COLUMNS = `
   status TEXT NOT NULL DEFAULT 'processing'
     CHECK (status IN ('processing','ready','error')),
   error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  page_offsets TEXT,                -- PDF only: JSON array, offset in content where each page starts
+  outline TEXT                      -- PDF only: JSON [{ title, start }] of top-level bookmarks
 `;
 
 // A material has notes in several styles, at most one row per style. Ids are never reused, so
@@ -27,6 +29,7 @@ const NOTES_COLUMNS = `
     CHECK (status IN ('processing','ready','error')),
   error TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  chapters TEXT,                    -- by-chapter: JSON { method, chapters: [{ title, start }] }
   UNIQUE (material_id, style)
 `;
 
@@ -63,6 +66,7 @@ export function getDb() {
   db.exec(SCHEMA);
   migrateMaterialsType(db);
   migrateNotesStyle(db);
+  migrateChapterColumns(db);
   // one vector per chunk; rowid = chunks.id
   db.exec(
     `CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(embedding float[${embedDim}]);`
@@ -111,6 +115,19 @@ function migrateNotesStyle(db) {
       DROP TABLE notes;
       ALTER TABLE notes_new RENAME TO notes;`);
   })();
+}
+
+// Databases created before the by-chapter style have no PDF page offsets, PDF outline or
+// detected chapters. The columns are added empty: PDFs imported before have no pages or outline,
+// so chapter detection skips the PDF outline for them.
+function migrateChapterColumns(db) {
+  const add = (table, column) => {
+    const columns = db.pragma(`table_info(${table})`).map((info) => info.name);
+    if (!columns.includes(column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+  };
+  add('materials', 'page_offsets');
+  add('materials', 'outline');
+  add('notes', 'chapters');
 }
 
 export function closeDb() {

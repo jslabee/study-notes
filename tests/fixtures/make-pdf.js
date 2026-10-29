@@ -35,12 +35,48 @@ export function textStream(lines) {
     .join('\n');
 }
 
+// Outline (bookmark) objects with ids from rootId on: entries are { title, page (index from 0),
+// children }; each points to the top of its page
+function outlineObjects(entries, rootId, pageIds) {
+  let nextId = rootId + 1;
+  const assign = (items) =>
+    items.map((item) => ({ ...item, id: nextId++, children: assign(item.children ?? []) }));
+  const tree = assign(entries);
+  const bodies = new Map();
+  const add = (items, parentId) => {
+    items.forEach((item, i) => {
+      const links = [
+        i > 0 ? `/Prev ${items[i - 1].id} 0 R` : '',
+        i < items.length - 1 ? `/Next ${items[i + 1].id} 0 R` : '',
+        item.children.length
+          ? `/First ${item.children[0].id} 0 R /Last ${item.children.at(-1).id} 0 R /Count ${item.children.length}`
+          : '',
+      ].join(' ');
+      bodies.set(
+        item.id,
+        `<< /Title (${escape(item.title)}) /Parent ${parentId} 0 R /Dest [${pageIds[item.page]} 0 R /Fit] ${links} >>`
+      );
+      add(item.children, item.id);
+    });
+  };
+  add(tree, rootId);
+  bodies.set(
+    rootId,
+    `<< /Type /Outlines /First ${tree[0].id} 0 R /Last ${tree.at(-1).id} 0 R /Count ${tree.length} >>`
+  );
+  return [...bodies.entries()].sort(([a], [b]) => a - b).map(([, body]) => body);
+}
+
 // Builds a PDF from page content streams, computing the cross-reference offsets;
-// pdf.js ignores text outside the page, so large test documents need a larger page
-export function buildPdf(streams, { width = 595, height = 842 } = {}) {
+// pdf.js ignores text outside the page, so large test documents need a larger page.
+// outline: optional bookmarks [{ title, page, children }]
+export function buildPdf(streams, { width = 595, height = 842, outline = [] } = {}) {
   const pageIds = streams.map((_, i) => 4 + i * 2);
+  const outlineId = 4 + streams.length * 2;
   const objects = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
+    outline.length
+      ? `<< /Type /Catalog /Pages 2 0 R /Outlines ${outlineId} 0 R >>`
+      : '<< /Type /Catalog /Pages 2 0 R >>',
     `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${streams.length} >>`,
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
   ];
@@ -51,6 +87,7 @@ export function buildPdf(streams, { width = 595, height = 842 } = {}) {
       `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`
     );
   }
+  if (outline.length) objects.push(...outlineObjects(outline, outlineId, pageIds));
 
   let pdf = '%PDF-1.4\n';
   const offsets = objects.map((body, i) => {

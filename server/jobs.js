@@ -7,16 +7,23 @@ const queue = [];
 let running = false;
 let idleWaiters = [];
 
-// Progress of waiting and running notes jobs by notes id: { phase, done, total, startedAt };
-// phase is "queued" until the job starts, then parts, compress or merge
+// Progress of waiting and running notes jobs by notes id: { phase, done, total, startedAt }, and
+// chapter ({ kind, number, count }) while by-chapter notes summarize a chapter; phase is
+// "queued" until the job starts, then detect, parts, compress, merge or overview
 const notesProgress = new Map();
 
 // The progress of a notes job for the API, or null when no job is known for these notes
 export function getNotesProgress(notesId) {
   const progress = notesProgress.get(notesId);
   if (!progress) return null;
-  const { phase, done, total, startedAt } = progress;
-  return { phase, done, total, elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000) };
+  const { phase, done, total, startedAt, chapter } = progress;
+  return {
+    phase,
+    done,
+    total,
+    elapsedSeconds: Math.floor((Date.now() - startedAt) / 1000),
+    ...(chapter && { chapter }),
+  };
 }
 
 function formatDuration(ms) {
@@ -33,7 +40,7 @@ const handlers = {
   notes: async (notesId, llm) => {
     const row = getDb()
       .prepare(
-        `SELECT n.style, m.title, m.content FROM notes n
+        `SELECT n.style, n.chapters, m.id, m.title, m.content, m.outline FROM notes n
          JOIN materials m ON m.id = n.material_id
          WHERE n.id = ? AND n.status = 'processing'`
       )
@@ -50,10 +57,15 @@ const handlers = {
       (used ? `${used.provider}:${used.model}` : 'no model');
     try {
       used = llm ?? (await resolveLlm({ textLength: row.content.length }));
-      const content = await generateNotes(row, {
+      const material = { id: row.id, title: row.title, content: row.content, outline: JSON.parse(row.outline) };
+      const content = await generateNotes(material, {
         style: row.style,
         ...used,
-        onProgress: (state) => Object.assign(progress, state),
+        onProgress: ({ chapter = null, ...state }) => Object.assign(progress, state, { chapter }),
+        // by-chapter: chapters detected before are used again, new ones are stored at once
+        detection: JSON.parse(row.chapters),
+        onChapters: (detection) =>
+          getDb().prepare('UPDATE notes SET chapters = ? WHERE id = ?').run(JSON.stringify(detection), notesId),
       });
       getDb()
         .prepare("UPDATE notes SET content = ?, model = ?, status = 'ready', error = NULL WHERE id = ?")
