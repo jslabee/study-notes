@@ -1,0 +1,119 @@
+/* Home screen: grid of course cards */
+.home {
+  overflow-y: auto;
+}
+
+.home-inner {
+  display: grid;
+  gap: var(--space-6);
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--space-7) var(--space-4) var(--space-8);
+}
+
+.home-heading {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.home-heading h1 {
+  font-size: var(--font-size-2xl);
+}
+
+.home-hint {
+  text-align: center;
+}
+
+.course-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.course-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  height: 100%;
+  min-height: 170px;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    box-shadow var(--duration-normal),
+    border-color var(--duration-normal),
+    transform var(--duration-normal);
+}
+
+.course-card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.course-card-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+}
+
+.course-card-name {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-tight);
+  overflow-wrap: anywhere;
+}
+
+.course-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-top: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.course-card-new {
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--color-accent);
+  background: var(--color-accent-soft);
+  box-shadow: none;
+  color: var(--color-accent-text);
+}
+
+.course-card-new:hover {
+  border-color: var(--color-accent-hover);
+}
+
+.course-card-new-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.course-card-skeleton {
+  cursor: default;
+}
+
+.course-card-skeleton:hover {
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}

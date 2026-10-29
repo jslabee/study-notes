@@ -1,0 +1,149 @@
+/* Notes panel and the Markdown typography shared with chat answers */
+.notes-source {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: none;
+  padding: var(--space-3) var(--space-4) 0;
+}
+
+.notes-source-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.notes-source-title:hover {
+  color: var(--color-accent-text);
+  text-decoration: underline;
+}
+
+.notes-hint {
+  margin-bottom: var(--space-3);
+}
+
+.notes-skeleton {
+  display: grid;
+  gap: var(--space-6);
+  padding: var(--space-2);
+}
+
+.notes-progress {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-6) var(--space-3);
+  text-align: center;
+}
+
+.notes-progress-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  color: var(--color-accent-text);
+  font-weight: var(--font-weight-medium);
+}
+
+.progress-bar {
+  position: relative;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-3);
+  overflow: hidden;
+}
+
+.progress-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  animation: progress 1.6s ease-in-out infinite;
+}
+
+@keyframes progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+.notes-content {
+  padding: var(--space-1) var(--space-2) var(--space-4);
+}
+
+/* Markdown */
+.markdown {
+  line-height: var(--line-height-body);
+}
+
+.markdown > * + * {
+  margin-top: var(--space-3);
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  font-size: var(--font-size-md);
+}
+
+.notes-content h2 {
+  margin-top: var(--space-6);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-accent-text);
+  font-size: var(--font-size-sm);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.notes-content h2:first-child {
+  margin-top: 0;
+}
+
+.notes-content p,
+.notes-content li {
+  font-size: var(--font-size-md);
+  line-height: var(--line-height-reading);
+}
+
+.markdown ul,
+.markdown ol {
+  padding-left: var(--space-5);
+}
+
+.markdown li + li {
+  margin-top: var(--space-1);
+}
+
+.markdown li::marker {
+  color: var(--color-text-subtle);
+}
+
+.markdown strong {
+  font-weight: var(--font-weight-bold);
+}
+
+.markdown code {
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-3);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.markdown a {
+  color: var(--color-accent-text);
+}

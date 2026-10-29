@@ -35,7 +35,9 @@ export function createCourse(name) {
   return postJson('/api/courses', { name })
 }
 
+// Without a courseId, the materials of all courses are returned
 export function getMaterials(courseId) {
+  if (courseId === undefined) return request('/api/materials')
   return request(`/api/materials?courseId=${encodeURIComponent(courseId)}`)
 }
 
@@ -71,7 +73,10 @@ export function generateNotes(materialId) {
   return request(`/api/materials/${materialId}/notes`, { method: 'POST' })
 }
 
-// courseId null means all courses
-export function ask(question, courseId) {
-  return postJson('/api/ask', courseId === null ? { question } : { question, courseId })
+// courseId null means all courses; materialIds limits the search to those materials
+export function ask(question, { courseId = null, materialIds } = {}) {
+  const body = { question }
+  if (courseId !== null) body.courseId = courseId
+  if (materialIds) body.materialIds = materialIds
+  return postJson('/api/ask', body)
 }
