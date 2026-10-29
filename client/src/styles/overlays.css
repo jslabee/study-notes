@@ -1,0 +1,263 @@
+/* Modal dialogs, drop zone, tooltips, citation popover and toasts */
+.modal {
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+  max-height: calc(100dvh - 2 * var(--space-6));
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-text);
+}
+
+.modal-small {
+  width: min(420px, calc(100vw - 2 * var(--space-4)));
+}
+
+.modal::backdrop {
+  background: var(--color-overlay);
+}
+
+.modal-content {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-3) var(--space-2) var(--space-5);
+}
+
+.modal-header h2 {
+  flex: 1;
+  font-size: var(--font-size-xl);
+}
+
+.modal-body {
+  padding: var(--space-2) var(--space-5) var(--space-5);
+  overflow-y: auto;
+}
+
+/* Drop zone */
+.drop-zone {
+  position: relative;
+  border: 2px dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-2);
+  transition:
+    border-color var(--duration-fast),
+    background var(--duration-fast);
+}
+
+.drop-zone.is-dragging,
+.drop-zone:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.drop-zone:has(.drop-zone-input:focus-visible) {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* The input stays focusable and reachable by screen readers, the label is the visible target */
+.drop-zone-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.drop-zone-label {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-1);
+  padding: var(--space-7) var(--space-4);
+  text-align: center;
+  cursor: pointer;
+}
+
+.drop-zone-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-accent-text);
+}
+
+.drop-zone-browse {
+  color: var(--color-accent-text);
+  font-weight: var(--font-weight-medium);
+  text-decoration: underline;
+}
+
+.drop-zone-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-2);
+}
+
+.drop-zone-file-info {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.drop-zone-file-name {
+  font-weight: var(--font-weight-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Tooltip for the error badge */
+.tooltip {
+  position: relative;
+  cursor: help;
+}
+
+.tooltip-bubble {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: max-content;
+  max-width: 240px;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-text);
+  box-shadow: var(--shadow-md);
+  color: var(--color-surface);
+  font-size: var(--font-size-xs);
+  font-weight: normal;
+  line-height: var(--line-height-body);
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity var(--duration-fast);
+}
+
+.tooltip:hover .tooltip-bubble,
+.tooltip:focus-visible .tooltip-bubble {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Citation popover */
+.citation-popover {
+  position: fixed;
+  z-index: 30;
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+  font-size: var(--font-size-sm);
+  line-height: var(--line-height-body);
+}
+
+.citation-popover-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.citation-popover-number {
+  display: grid;
+  place-items: center;
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  border-radius: var(--radius-pill);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+}
+
+.citation-popover-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-popover-excerpt {
+  max-height: 220px;
+  overflow-y: auto;
+  color: var(--color-text-muted);
+  white-space: pre-wrap;
+}
+
+.citation-popover .link-btn {
+  justify-self: start;
+}
+
+/* Toasts */
+.toasts {
+  position: fixed;
+  right: var(--space-4);
+  bottom: var(--space-4);
+  z-index: 50;
+  display: grid;
+  gap: var(--space-2);
+  width: min(380px, calc(100vw - 2 * var(--space-4)));
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--color-text);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-surface);
+  font-size: var(--font-size-sm);
+  pointer-events: auto;
+  animation: toast-in var(--duration-normal) ease-out;
+}
+
+.toast > span {
+  flex: 1;
+}
+
+.toast-success svg:first-child {
+  color: var(--color-success-soft);
+}
+
+.toast-error {
+  background: var(--color-danger);
+  color: var(--color-surface);
+}
+
+.toast .toast-close {
+  width: 28px;
+  height: 28px;
+  color: inherit;
+}
+
+.toast .toast-close:hover {
+  background: rgb(127 127 127 / 0.25);
+  color: inherit;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
