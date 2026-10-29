@@ -24,7 +24,10 @@ export async function indexMaterial(materialId, { embed = llmEmbed } = {}) {
   const insertChunk = db.prepare(
     'INSERT INTO chunks (material_id, position, text) VALUES (?, ?, ?)'
   );
-  const insertVector = db.prepare('INSERT INTO chunk_vectors (rowid, embedding) VALUES (?, ?)');
+  // The material is stored with each vector, so search can filter by it (see search.js)
+  const insertVector = db.prepare(
+    'INSERT INTO chunk_vectors (rowid, embedding, material_id) VALUES (?, ?, ?)'
+  );
 
   const save = db.transaction(() => {
     // The material may have been deleted while embeddings were computed
@@ -33,7 +36,7 @@ export async function indexMaterial(materialId, { embed = llmEmbed } = {}) {
     deleteChunks(materialId);
     chunks.forEach((text, position) => {
       const chunkId = insertChunk.run(materialId, position, text).lastInsertRowid;
-      insertVector.run(BigInt(chunkId), vectors[position]);
+      insertVector.run(BigInt(chunkId), vectors[position], BigInt(materialId));
     });
     db.prepare("UPDATE materials SET status = 'ready', error = NULL WHERE id = ?").run(
       materialId

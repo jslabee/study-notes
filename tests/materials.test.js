@@ -109,9 +109,10 @@ test('deleting a material removes it with its notes, chunks and vectors', async 
   const chunkId = db
     .prepare('INSERT INTO chunks (material_id, position, text) VALUES (?, 0, ?)')
     .run(id, 'Temporary text.').lastInsertRowid;
-  db.prepare('INSERT INTO chunk_vectors (rowid, embedding) VALUES (?, ?)').run(
+  db.prepare('INSERT INTO chunk_vectors (rowid, embedding, material_id) VALUES (?, ?, ?)').run(
     BigInt(chunkId),
-    new Float32Array(dim)
+    new Float32Array(dim),
+    BigInt(id)
   );
   db.prepare("INSERT INTO notes (material_id, content, status) VALUES (?, 'x', 'ready')").run(id);
 
