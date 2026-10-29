@@ -1,52 +1,55 @@
-# Pregled kode – Study Notes
+# Ponovni pregled kode – Study Notes
 
-**Datum pregleda:** 29. 10. 2026  
-**Pregledana veja:** `feature/scaffold` (privzeta veja ob pregledu)  
-**Obseg:** statični pregled izvorne kode in primerjava z `CLAUDE.md` ter `docs/spec.md`. Obstoječa aplikacijska koda ni bila spreminjana.
+**Datum:** 29. 10. 2026  
+**Veja:** `feature/scaffold`  
+**Obseg:** ponoven pregled trenutne kode na veji, primerjava z `CLAUDE.md`, `docs/spec.md`, README in testi. To je statični pregled prek GitHub API; ukazi projekta niso bili izvedeni. Spremenjena je samo ta datoteka s poročilom.
 
 ## Povzetek
 
-Aplikacija večinoma sledi načrtovani arhitekturi: uporablja parametrične SQL-poizvedbe, ločeno vrsto opravil, vektorsko indeksiranje in teste za ključne poti. Sistemska navodila za zapiske in RAG so v kodi kopirana dobesedno iz specifikacije, za kar obstajajo tudi testi.
+Aplikacija je razmeroma dobro razdeljena na strežniške module, uporabniški vmesnik, bazo in opravila v ozadju. Pregledani SQL-klici za uporabniške podatke uporabljajo parametre; brisanje gradiva pravilno odstrani vektorje pred kosi, nato pa se z brisanjem prek tujih ključev odstranijo gradivo in zapiski. Sistemski pozivi za zapiske, združevanje zapiskov in RAG se ujemajo z bloki v specifikaciji, za kar obstajajo tudi testi.
 
-Najpomembnejši problem je iskanje RAG: omejitev števila najbližjih vektorjev se uporabi **pred** filtriranjem na gradiva s stanjem `ready` oziroma na izbrani tečaj. Zato lahko API vrne manj kot šest virov ali celo nič, čeprav ustrezni viri obstajajo. Poleg tega klic Ollame nima časovne omejitve; ker se opravila izvajajo zaporedno, lahko nedokončan klic ustavi celotno vrsto. Aplikacija nima vgrajene avtentikacije, zato mora ostati omejena na zaupanja vredno okolje, kot predvideva specifikacija.
+V primerjavi s prejšnjo različico poročila sem popravil pomembno napako: iskanje 30 kandidatov pred filtriranjem po tečaju je izrecno določeno v specifikaciji, zato samo po sebi ni odstopanje od zahtev. Tudi manj kot šest zadetkov brez filtra je opisano kot znana omejitev v README. Glavne preostale skrbi so odsotnost časovne omejitve za Ollama zahteve, tekmovalni pogoji pri osveževanju seznama gradiv in varnostno tveganje, če bi bil API dosegljiv zunaj zaupanja vrednega omrežja.
 
 ## Ugotovitve
 
 | ID | Resnost | Področje | Datoteka in vrstice | Težava | Predlagani popravek |
 |---|---|---|---|---|---|
-| CR-01 | **major** | Pravilnost RAG / iskanje | `server/rag/search.js:15–33` | Poizvedba najprej izbere `k` najbližjih vektorjev iz celotne tabele, šele nato združi gradiva in odstrani tista, ki niso `ready`, oziroma filtrira izbrani tečaj. Neprimerni zadetki tako porabijo omejitev `k`. Posledica je manj kot šest virov ali prazen rezultat, čeprav v izbranem tečaju oziroma med pripravljenimi gradivi obstajajo ustrezni kosi. Test `tests/rag.test.js` trenutno potrjuje to zmanjšanje rezultatov namesto pričakovanega iskanja samo po uporabnih gradivih. | Zagotoviti, da je nabor kandidatov omejen na gradiva `ready` in po potrebi na izbrani tečaj, preden se določi končnih šest rezultatov. Če omejitev `sqlite-vec` otežuje filtriranje v KNN-poizvedbi, uporabiti strategijo kandidiranja, ki nadaljuje iskanje, dokler ne zbere šest ustreznih zadetkov, ali primerjati izvedljivo alternativo. Dodati test, kjer je veliko bližjih kosov iz drugih/nepripravljenih gradiv, pripravljeno gradivo pa mora vseeno vrniti zadetke. |
-| CR-02 | **major** | Zanesljivost / obdelava v ozadju | `server/llm.js:118–126`; `server/jobs.js:49–71` | Klic `fetch()` na Ollamo nima `AbortSignal` oziroma časovne omejitve. Če storitev sprejme povezavo, vendar ne odgovori, se `indexMaterial()` ne zaključi. Ker `jobs.js` izvaja opravila eno za drugim, ostanejo za tem čakajoča indeksiranja in priprava zapiskov blokirani, uporabniški vmesnik pa lahko neskončno prikazuje `Processing`. | Dodati nastavljivo časovno omejitev za Ollama zahteve, pravilno obravnavati `AbortError` in prekiniti opravilo z jasnim sporočilom o napaki. Po potrebi dodati omejeno ponavljanje samo za prehodne napake; zagotoviti, da se status gradiva vedno preklopi v `error`, ko je zahteva dokončno neuspešna. Testirati strežnik, ki se ne odzove. |
-| CR-03 | **major – pogojno glede na okolje** | Varnost / dostop do podatkov | `server/index.js:54–169` | API nima avtentikacije ali avtorizacije. Kdor lahko doseže strežnik, lahko bere vsa gradiva in zapiske, briše gradiva ter sproža klice OpenAI, ki lahko povzročijo stroške. `CLAUDE.md` in `docs/spec.md` sicer določata interno uporabo in izrecno izključujeta prijavo v različici 1.0, zato to ni odstopanje od funkcionalnega obsega, je pa pomembno tveganje pri napačni izpostavitvi omrežju. | Aplikacije ne izpostavljati javnemu internetu. Omejiti dostop na localhost ali zaupanja vredno interno omrežje in/ali pred API postaviti avtentikacijski reverse proxy. Pred vsako širšo uporabo dodati avtentikacijo in preverjanje pravic. V dokumentaciji jasno navesti, da aplikacija brez dodatne zaščite ni primerna za javno gostovanje. |
-| CR-04 | **minor** | Uvoz / kakovost besedila | `server/materials/convert.js:25–38` | Pri podnapisih se vsaka vrstica z besedilom združi v en sam tok, odstavki pa se zaključijo šele, ko je zbranih vsaj 500 znakov in se trenutni cue konča s končnim ločilom. Kratki transkripti brez ločil ali s pogostimi kratkimi stavki zato lahko postanejo en sam dolg odstavek. To poslabša berljivost prikaza in lahko zmanjša kakovost razreza za zapiske. | Ohranjati meje izvornih blokov/cue-jev kot šibke meje odstavkov ali uporabiti bolj robustno pravilo, ki ne zahteva minimalne dolžine 500 znakov. Dodati primere kratkega transkripta, več govorcev in besedila brez ločil. |
-| CR-05 | **minor** | Uporabniški vmesnik / asinhroni klici | `client/src/views/Materials.jsx:35–46, 60–67` | Pri hitrem menjavanju tečajev se lahko prekrivata dva klica `loadMaterials()`. Če starejši klic konča pozneje, lahko prepiše seznam gradiv novega tečaja in nastavi `loadedCourseId` na zastarel tečaj. | Ob menjavi tečaja preklicati prejšnji `fetch` z `AbortController` ali uporabiti števec zahtev in sprejeti samo rezultat zadnje zahteve. Dodati test oziroma ročno preverjanje s počasnim omrežjem. |
-| CR-06 | **minor** | Validacija vhodov / omejevanje porabe | `server/index.js:85–100, 158–160` | Polja `title`, ime tečaja in vprašanje nimajo namenskih omejitev dolžine. Omejitev velikosti multipart polja sicer omeji posamezen prenos, vendar dopušča zelo velika imena in dolga vprašanja; ta se lahko shranijo v bazo ali pošljejo storitvam za vektorje in model. | Določiti razumne največje dolžine za ime tečaja, naslov in vprašanje ter jih preverjati na strežniku. Za predolge vrednosti vrniti `400` z jasnim sporočilom; omejitve po potrebi uskladiti z uporabniškim vmesnikom. |
+| CR-01 | **major** | Zanesljivost / obdelava v ozadju | `server/llm.js:118–126`; `server/jobs.js:49–71` | Klic `fetch()` do Ollame nima eksplicitne časovne omejitve ali `AbortSignal`. Če storitev vzpostavi povezavo, vendar ne odgovori, se indeksiranje ne zaključi. Ker se opravila izvajajo zaporedno, lahko viseča zahteva zadrži vsa nadaljnja indeksiranja in pripravo zapiskov; stanje ostane `processing`. | Dodati nastavljivo časovno omejitev za zahteve Ollama, ob prekoračitvi vrniti razumljivo napako in zagotoviti, da se status opravila zapiše kot `error`. Dodati test z lažnim strežnikom, ki ne odgovori. |
+| CR-02 | **major – odvisno od načina gostovanja** | Varnost / dostop do podatkov | `server/index.js:54–169, 213–216` | API nima avtentikacije ali avtorizacije, strežnik pa se zažene brez izrecne omejitve gostiteljskega naslova. Če je proces dosegljiv iz nezaupanja vrednega omrežja, lahko drugi berejo interna gradiva in zapiske, brišejo gradiva ter sprožajo klice OpenAI, ki povzročajo stroške. Odsotnost prijave je sicer skladna z obsegom različice 1.0 v specifikaciji, ki aplikacijo določa za interno uporabo. | Za trenutno različico omejiti dostop na localhost ali zanesljivo interno omrežje oziroma uporabiti avtentikacijski reverse proxy. Pred javnim ali širše dostopnim gostovanjem dodati avtentikacijo in avtorizacijo. V navodilih za namestitev izrecno opozoriti na omrežno omejitev. |
+| CR-03 | **minor** | Uporabniški vmesnik / asinhroni podatki | `client/src/views/Materials.jsx:35–46, 60–67` | Ob hitri menjavi tečaja lahko klic za prejšnji tečaj še teče, ko se začne klic za novega. Če starejši odgovor prispe zadnji, lahko prepiše seznam gradiv in `loadedCourseId` z zastarelimi podatki. | Uporabiti `AbortController` ali identifikator zaporedja zahtev in upoštevati samo odgovor zadnje zahteve. Dodati regresijski test za prekrivajoča se klica. |
+| CR-04 | **minor** | Validacija / omejevanje porabe | `server/index.js:50, 62–68, 85–100, 158–160` | Imena tečajev in naslovov nimajo namenskih omejitev dolžine; prilepljeno besedilo lahko doseže 5 MiB, vprašanje pa je omejeno le s splošno omejitvijo JSON-parserja. To ni neposredna SQL-injection ranljivost, vendar lahko zelo dolgi naslovi ali vprašanja po nepotrebnem obremenijo shranjevanje in modelne storitve. | Določiti razumne poslovne omejitve za ime tečaja, naslov in vprašanje ter jih preverjati na strežniku. Omejitve prikazati tudi v obrazcih in vrniti dosledno napako 400. |
+| CR-05 | **minor** | Konfiguracija razvoja | `client/vite.config.js:4–11` | Naslov proxy strežnika ima trdo kodirano ime gostitelja `localhost`, medtem ko `CLAUDE.md` pravi, naj se naslovi in konfiguracija berejo iz okolja. Vrata so sicer prebrana iz `PORT`. To lahko povzroči težave v razvojnem okolju, kjer strežnik ni na istem gostitelju. | Če je podprta oddaljena razvojna postavitev, dodati okoljsko spremenljivko za API origin/host in jo uporabiti pri proxyju. Če je localhost namerna omejitev specifikacije, jo dokumentirati kot izjemo. |
+| CR-06 | **minor** | Kakovost RAG / odpornost na navodila v virih | `server/rag/answer.js:10–31` | Vsebina odlomkov in vprašanje sta poslana modelu kot uporabniško sporočilo. Poziv pravilno zahteva uporabo samo odlomkov, vendar ne obravnava izrecno morebitnih navodil, vdelanih v uvožena gradiva. Če gradivo vsebuje besedilo, ki model nagovarja k ignoriranju naloge, se lahko kakovost odgovora in citiranja poslabša. To je predvsem tveganje kakovosti modela, ne dokaz neposrednega izvajanja kode. | Jasneje označiti odlomke kot nezaupanja vredno citirano vsebino in dodati pravilo, naj model navodil znotraj odlomkov ne izvršuje. Dodati evalvacijska vprašanja z namerno zavajajočim besedilom v gradivu ter preveriti, da odgovori ostanejo vezani na vire. |
 
-## Primerjava s specifikacijo
+## Preverjene skladnosti in pojasnila
 
-- **Modelni pozivi:** `NOTES_SYSTEM_PROMPT`, `MERGE_SYSTEM_PROMPT` in `ANSWER_SYSTEM_PROMPT` so v kodi zapisani dobesedno; testi preverjajo ujemanje z bloki v `docs/spec.md`.
-- **SQL-injection:** pregledane poizvedbe za uporabniške vrednosti uporabljajo parametre SQLite (`?`), ne sestavljajo SQL iz neposrednega vnosa.
-- **Brisanje:** `deleteMaterial()` odstrani vektorje pred kosi in gradivom; zapiski in kosi imajo tuje ključe s kaskadnim brisanjem. To je skladno s posebnostjo `sqlite-vec`, ki nima tujih ključev.
-- **Uvoz:** strežnik omejuje datoteke in polja na 5 MiB ter dovoljuje končnice TXT/SRT/VTT, kot zahteva specifikacija. Preverjanje vrste temelji na končnici datoteke, ne na vsebini; za interno aplikacijo je to omejena validacija, ne dokaz vrste datoteke.
-- **Opravila ob ponovnem zagonu:** `restoreJobs()` ponovno doda gradiva in zapiske v stanju `processing` v vrsto.
-- **Modeli in ponovitve:** OpenAI uporablja `OPENAI_MODEL`, izklopljene so interne ponovitve SDK-ja, implementirane pa so največ tri ponovitve pri prehodnih napakah. Embeddings uporabljajo nastavitve Ollame in pakete po največ 32 besedil.
-- **Prikaz Markdown:** vmesnik uporablja `react-markdown` brez omogočanja surovega HTML-ja, kar zmanjša tveganje neposrednega XSS prek Markdown vsebine. Kljub temu je treba ohraniti to varno privzeto konfiguracijo.
-- **Specifikacija in navodila:** `CLAUDE.md` zahteva, da se `docs/spec.md` in modelni pozivi ohranijo; poročilo je dodano kot ločena datoteka in ne spreminja teh dveh dokumentov.
+- **Pozivi modelu:** `NOTES_SYSTEM_PROMPT`, `MERGE_SYSTEM_PROMPT` in `ANSWER_SYSTEM_PROMPT` se ujemajo z besedilom v `docs/spec.md`; testi v `tests/notes.test.js` in `tests/rag.test.js` preverjajo to ujemanje.
+- **SQL-injection:** v pregledanih API in podatkovnih modulih so vrednosti podane kot parametri SQLite (`?`), ne z vstavljanjem neposrednega vnosa v SQL.
+- **Brisanje in doslednost podatkov:** `deleteMaterial()` izvede transakcijo, najprej izbriše vektorje in kose, nato gradivo. Zapiski in kosi so vezani na gradivo s `ON DELETE CASCADE`.
+- **Uvoz:** strežnik sprejme TXT/SRT/VTT po končnici in omeji datoteke ter polja na 5 MiB. Končnica ni preverjanje dejanske vsebine datoteke, vendar je to v skladu z izrecno preprosto specifikacijo; pri strožjem varnostnem modelu bi bilo treba dodati vsebinsko preverjanje.
+- **Obnovitev opravil:** `restoreJobs()` ponovno doda zapise s stanjem `processing` v vrsto. Testi preverjajo ponovno dodajanje, ne pa popolnega izklopa in zagona ločenega procesa.
+- **OpenAI:** model se bere iz `OPENAI_MODEL`; interne ponovitve SDK so izklopljene, aplikacija pa ponavlja prehodne napake do treh dodatnih poskusov. Neuspehi se pretvorijo v berljiva sporočila.
+- **Embeddings:** Ollama zahteve pošiljajo največ 32 besedil naenkrat; število vektorjev in dimenzija sta preverjena, vektorji pa normalizirani.
+- **RAG kandidatni filter:** izbira 30 najbližjih kosov pred filtriranjem na tečaj je izrecno navedena v `docs/spec.md`. Test `tests/rag.test.js` preverja tudi, da kosi zunaj 30 kandidatov ne pridejo v rezultat. Pri iskanju brez filtra se vzame šest najbližjih kosov, nato se izločijo gradiva, ki niso `ready`; README to omejitev dokumentira. To ni uvrščeno med napake glede na trenutno specifikacijo, čeprav lahko vpliva na število virov.
+- **Markdown:** vmesnik uporablja `react-markdown` brez vklopa surovega HTML-ja, kar zmanjša možnost XSS prek vsebine Markdown.
+- **Vmesnik:** stanje obdelave se osvežuje na tri sekunde, v prikazu gradiva je vsebina privzeto skrajšana, napake pa so prikazane uporabniku.
+- **Omejitev obsega:** PDF/DOCX, prijava uporabnikov in pravice niso del različice 1.0 po `docs/spec.md`; njihova odsotnost zato ni označena kot napaka.
 
-## Preverjanje
+## Testi, gradnja in odvisnosti
 
-**Testov, gradnje in varnostnega pregleda odvisnosti v tem okolju nisem mogel zagnati.** Dostop do repozitorija je omogočil branje in urejanje datotek prek GitHuba, ne pa izvajanja ukazov v kloniranem delovnem okolju. Zato spodnji rezultati niso predstavljeni kot uspešni ali neuspešni:
+Tega okolja nisem mogel uporabiti za izvajanje ukazov v kloniranem repozitoriju. Zato ne trdim, da so testi ali gradnja uspešni:
 
-- `npm test` — ni zagnan.
-- `npm run build` — ni zagnan.
-- `npm audit` — ni zagnan.
-- Evalvacija `npm run eval` z resničnimi gradivi in delujočo Ollamo — ni zagnana.
+- `npm test` — **ni zagnan**.
+- `npm run build` — **ni zagnan**.
+- `npm audit` — **ni zagnan**.
+- `npm run eval` — **ni zagnan**; potrebuje konfigurirano bazo, resnična gradiva in delujočo Ollamo.
 
-Pred združitvijo je treba te ukaze zagnati v lokalnem okolju ali CI. `npm run eval` potrebuje konfigurirane spremenljivke okolja, indeksirana gradiva in delujočo Ollamo; vzorčni evalvacijski rezultat zato ne bi bil zanesljiv brez ustreznih gradiv.
+Testna zbirka pokriva konverzijo TXT/SRT/VTT, velikost uvoza, indeksiranje in brisanje, razrez kosov, dimenzije vektorjev, API vprašanj, obdelavo zapiskov in dobesedno ujemanje pozivov. Za zaključek pregleda je še vedno potrebno lokalno ali CI izvajanje zgornjih ukazov. Za varnost odvisnosti je posebej pomemben `npm audit`, ker statični pregled kode ne preveri znanih ranljivosti paketov.
 
-## Pet najpomembnejših popravkov
+## Pet najpomembnejših naslednjih korakov
 
-1. Popraviti iskanje RAG, da se končni zadetki izbirajo samo med gradivi `ready` in znotraj izbranega tečaja.
-2. Dodati časovne omejitve Ollama zahtev in zagotoviti, da nedosegljiva ali viseča storitev ne blokira vrste opravil.
-3. API omejiti na zaupanja vredno okolje; pred širšo izpostavitvijo dodati avtentikacijo.
-4. Dodati strežniške omejitve dolžine za imena, naslove in vprašanja.
-5. Preprečiti zastarele asinhrone odgovore pri hitrem preklapljanju tečajev ter dodati regresijski test.
+1. Dodati časovno omejitev Ollama zahtev in test za visečo storitev, da vrsta opravil ne ostane blokirana.
+2. Zagotoviti, da je API dosegljiv samo zaupanja vrednim uporabnikom/omrežju; pred širšo izpostavitvijo dodati avtentikacijo.
+3. Preprečiti prepisovanje seznama gradiv z zastarelimi odgovori pri hitri menjavi tečajev.
+4. Dodati omejitve dolžine za imena tečajev, naslove in vprašanja.
+5. Izvesti `npm test`, `npm run build` in `npm audit` v lokalnem okolju ali CI ter rezultate dopisati v poročilo.
