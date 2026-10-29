@@ -8,6 +8,7 @@ Internal web app for Abakus plus. It turns learning materials (lecture transcrip
 
 ## Tech stack
 - Server: Node.js (ES modules), Express, multer, better-sqlite3, sqlite-vec, openai, unpdf
+- LLM: OpenAI API or a local Ollama chat model, selected per request in server/llm.js (auto local | openai)
 - Client: React with Vite in client/, react-markdown, no router library
 - Embeddings: Ollama, model bge-m3
 - Tests: node:test (npm test)

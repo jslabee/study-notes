@@ -778,6 +778,15 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
    functions still work: create a course, add sources (including a PDF), generate
    notes, ask a question with all sources and with only some sources selected.
 ```
+### Nadgradnja 4 – Izbira ponudnika in modela
+Zapiski in odgovori lahko tečejo na lokalnem modelu (Ollama) ali OpenAI. Način auto
+uporabi lokalni model za besedila do LOCAL_MAX_CHARS, sicer OpenAI; local nikoli ne
+preklopi na OpenAI; openai je zavrnjen, ko je ALLOW_EXTERNAL=false. Nove spremenljivke:
+LOCAL_LLM_MODEL, LOCAL_MAX_CHARS, LOCAL_PART_CHARS, DEFAULT_PROVIDER, ALLOW_EXTERNAL,
+OPENAI_MODELS. GET /api/llm/models vrne nameščene lokalne modele (brez modelov za
+vektorje) in dovoljene modele OpenAI; izbira modela se pošlje z zahtevo (provider, model).
+
+
 Preverjanje
 npm run build  uspe.
 Vse funkcije iz točke 8 delujejo; odgovor pri nekaj izbranih virih navaja samo te vire.
