@@ -1,18 +1,5 @@
-import { complete as llmComplete } from '../llm.js';
-
-// Prompts are copied verbatim from docs/spec.md ("Zapiski")
-export const NOTES_SYSTEM_PROMPT = `You are an assistant that creates study notes from learning material. Use only information from the material; do not add or invent anything. Respond only with the notes in Markdown, in exactly this structure:
-
-## Summary
-3 to 5 sentences about the content of the material.
-
-## Key points
-5 to 15 bullet points, each expressing one clear idea.
-
-## Terms
-Bullet points in the form **term** – short explanation. Only terms that are important in the material.`;
-
-export const MERGE_SYSTEM_PROMPT = `Below are notes for individual parts of the same material. Merge them into a single set of notes with the same structure (Summary, Key points, Terms). Remove repetition. The summary should have 4 to 6 sentences and there should be at most 25 key points. Do not add anything.`;
+import { chat as llmChat, llmConfig } from '../llm.js';
+import { DEFAULT_STYLE, getStyle, mergePrompt } from './styles.js';
 
 export const MAX_PART_CHARS = 60000;
 export const GROUP_SIZE = 10;
@@ -90,26 +77,26 @@ export function mergeMessage(title, notesList) {
   return `Material title: ${title}\n\n${parts}`;
 }
 
-// Creates notes for a material; complete is replaceable so tests do not call the API
-export async function generateNotes({ title, content }, { complete = llmComplete } = {}) {
-  const parts = splitText(content);
+// Creates notes in a style with the resolved provider and model; the local model gets smaller
+// parts (LOCAL_PART_CHARS). chat is replaceable so tests do not call a model.
+export async function generateNotes(
+  { title, content },
+  { style = DEFAULT_STYLE, provider, model, chat = llmChat } = {}
+) {
+  const noteStyle = getStyle(style);
+  if (!noteStyle) throw new Error(`Unknown note style "${style}".`);
+
+  const parts = splitText(content, provider === 'local' ? llmConfig().localPartChars : MAX_PART_CHARS);
+  const complete = async (system, user) =>
+    (await chat({ provider, model, system, user, maxOutputTokens: MAX_OUTPUT_TOKENS })).text;
 
   const partNotes = [];
   for (let i = 0; i < parts.length; i++) {
     partNotes.push(
-      await complete({
-        system: NOTES_SYSTEM_PROMPT,
-        user: notesMessage(title, parts[i], i + 1, parts.length),
-        maxOutputTokens: MAX_OUTPUT_TOKENS,
-      })
+      await complete(noteStyle.prompt, notesMessage(title, parts[i], i + 1, parts.length))
     );
   }
 
-  return reduceNotes(partNotes, (group) =>
-    complete({
-      system: MERGE_SYSTEM_PROMPT,
-      user: mergeMessage(title, group),
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-    })
-  );
+  const merge = mergePrompt(noteStyle);
+  return reduceNotes(partNotes, (group) => complete(merge, mergeMessage(title, group)));
 }

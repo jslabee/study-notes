@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ask, deleteMaterial, getMaterial, getMaterials } from '../api.js'
+import { useLlm } from '../llm.js'
 import { useToast } from '../toast.js'
 import { useMediaQuery } from '../useMediaQuery.js'
 import AddSourceModal from '../components/AddSourceModal.jsx'
@@ -19,6 +20,7 @@ const TABS_ID = 'workspace'
 // App renders it with key={course.id}, so all state starts fresh for each course.
 function Workspace({ course }) {
   const notify = useToast()
+  const { choice } = useLlm()
   const narrow = useMediaQuery(NARROW_QUERY)
 
   const [materials, setMaterials] = useState(null)
@@ -138,11 +140,15 @@ function Workspace({ course }) {
     setMessages((current) => [...current, { id, role: 'user', text: question }])
     setSearching(true)
     try {
-      const { answer, sources } = await ask(question, {
+      const { answer, sources, provider, model } = await ask(question, {
         courseId: course.id,
         materialIds: checkedIds,
+        ...choice,
       })
-      setMessages((current) => [...current, { id: id + 1, role: 'assistant', answer, sources }])
+      setMessages((current) => [
+        ...current,
+        { id: id + 1, role: 'assistant', answer, sources, provider, model },
+      ])
     } catch (err) {
       setMessages((current) => [
         ...current,

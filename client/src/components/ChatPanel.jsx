@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ChatMessage from './ChatMessage.jsx'
 import EmptyState from './EmptyState.jsx'
 import Icon from './Icon.jsx'
+import LlmPicker from './LlmPicker.jsx'
 import Panel from './Panel.jsx'
 
 const MAX_INPUT_HEIGHT = 180
@@ -180,6 +181,9 @@ function ChatPanel({
           >
             <Icon name="send" size={18} />
           </button>
+          <div className="chat-llm">
+            <LlmPicker disabled={searching} />
+          </div>
         </div>
         <p id="chat-note" className="chat-note" aria-live="polite">
           {searching ? 'Searching...' : note}

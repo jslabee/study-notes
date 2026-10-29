@@ -1,5 +1,6 @@
 import AnswerText from './AnswerText.jsx'
 import ErrorState from './ErrorState.jsx'
+import ModelBadge from './ModelBadge.jsx'
 import { formatCount } from '../format.js'
 
 function ChatMessage({ message, onOpenSource, onRetry }) {
@@ -34,6 +35,7 @@ function ChatMessage({ message, onOpenSource, onRetry }) {
             ? 'No matching excerpts were found. Only sources with status Ready are searched.'
             : `Based on ${formatCount(message.sources.length, 'excerpt')}`}
         </p>
+        {message.provider && <ModelBadge value={`${message.provider}:${message.model}`} />}
       </div>
     </li>
   )

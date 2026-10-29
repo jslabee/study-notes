@@ -59,24 +59,42 @@ export function deleteMaterial(id) {
   return request(`/api/materials/${id}`, { method: 'DELETE' })
 }
 
-// Returns null when the material has no notes yet
-export async function getNotes(materialId) {
-  try {
-    return await request(`/api/materials/${materialId}/notes`)
-  } catch (err) {
-    if (err.status === 404) return null
-    throw err
-  }
+export function getNoteStyles() {
+  return request('/api/note-styles')
 }
 
-export function generateNotes(materialId) {
-  return request(`/api/materials/${materialId}/notes`, { method: 'POST' })
+// Notes of all styles generated for the material
+export function getNotes(materialId) {
+  return request(`/api/materials/${materialId}/notes`)
+}
+
+// Provider (auto | local | openai) and model; an empty model means the server default
+function llmChoice({ provider, model } = {}) {
+  const body = {}
+  if (provider) body.provider = provider
+  if (model) body.model = model
+  return body
+}
+
+export function generateNotes(materialId, { style, ...choice } = {}) {
+  return postJson(`/api/materials/${materialId}/notes`, { style, ...llmChoice(choice) })
+}
+
+export function deleteNotes(materialId, style) {
+  return request(`/api/materials/${materialId}/notes/${encodeURIComponent(style)}`, {
+    method: 'DELETE',
+  })
 }
 
 // courseId null means all courses; materialIds limits the search to those materials
-export function ask(question, { courseId = null, materialIds } = {}) {
-  const body = { question }
+export function ask(question, { courseId = null, materialIds, provider, model } = {}) {
+  const body = { question, ...llmChoice({ provider, model }) }
   if (courseId !== null) body.courseId = courseId
   if (materialIds) body.materialIds = materialIds
   return postJson('/api/ask', body)
+}
+
+// Default provider, whether OpenAI is allowed and the models of both providers
+export function getLlmModels({ refresh = false } = {}) {
+  return request(refresh ? '/api/llm/models?refresh=1' : '/api/llm/models')
 }

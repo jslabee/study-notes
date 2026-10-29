@@ -60,6 +60,10 @@ old.close();
 
 const { getDb, closeDb } = await import('../server/db.js');
 const db = getDb();
+// Read before the tests below delete rows
+const notesBefore = db
+  .prepare('SELECT id, material_id, style, content, model, status, error FROM notes ORDER BY id')
+  .all();
 
 after(() => {
   closeDb();
@@ -96,6 +100,14 @@ test('foreign keys are enforced and cascade after the migration', () => {
   assert.equal(db.prepare('SELECT count(*) AS n FROM materials').get().n, 0);
 });
 
+test('existing notes are kept as style study-notes and styles are unique per material', () => {
+  assert.deepEqual(notesBefore, [
+    { id: 1, material_id: 3, style: 'study-notes', content: '# Cells', model: 'm', status: 'ready', error: null },
+  ]);
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'notes'").get();
+  assert.match(sql, /UNIQUE \(material_id, style\)/);
+});
+
 test('opening an already migrated database changes nothing', () => {
   closeDb();
   const again = getDb();
@@ -104,4 +116,5 @@ test('opening an already migrated database changes nothing', () => {
     /'pdf'/
   );
   assert.equal(again.prepare("SELECT name FROM sqlite_master WHERE name = 'materials_new'").get(), undefined);
+  assert.equal(again.prepare("SELECT name FROM sqlite_master WHERE name = 'notes_new'").get(), undefined);
 });

@@ -542,3 +542,120 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch feature/ui-ux, changed files: 16
 
 **My changes and outcome:** 
+
+### 29/10/2026, 11:16:43
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Add a switchable LLM provider and model selection for notes and answers: local
+> (Ollama) or OpenAI.
+> 
+> 1. Configuration (.env, also add to .env.example):
+>    LOCAL_LLM_MODEL (default local model, e.g. gemma3:4b), LOCAL_MAX_CHARS
+>    (default 60000), LOCAL_PART_CHARS (default 15000), DEFAULT_PROVIDER
+>    (auto | local | openai, default auto), ALLOW_EXTERNAL (true | false, default
+>    true), OPENAI_MODELS (optional comma-separated list of OpenAI models the user
+>    may choose from; if empty, only OPENAI_MODEL is offered). Keep the existing
+>    OPENAI_API_KEY, OPENAI_MODEL, OLLAMA_URL and EMBED_MODEL.
+> 2. server/llm.js: one chat function that takes a provider (local | openai) and a
+>    model. Local uses Ollama's OpenAI-compatible endpoint ({OLLAMA_URL}/v1) through
+>    the same openai package with a different baseURL. Return the text and the
+>    provider and model actually used. Keep retries and clear errors.
+> 3. Local model list: read installed models from {OLLAMA_URL}/api/tags. Offer only
+>    chat models: exclude EMBED_MODEL and any model whose details from
+>    {OLLAMA_URL}/api/show do not list the "completion" capability (if the
+>    capabilities field is missing, exclude only EMBED_MODEL). Cache the list for 30
+>    seconds and refresh it on request.
+> 4. Provider and model resolution: the request may include provider and model.
+>    - auto: use local if the text is at most LOCAL_MAX_CHARS and the chosen local
+>      model is installed and Ollama is reachable, otherwise openai.
+>    - local: never falls back; return a clear error if Ollama is unreachable or the
+>      model is not installed.
+>    - openai: refused with a clear error when ALLOW_EXTERNAL is false; auto then
+>      uses local only.
+>    - If no model is given, use LOCAL_LLM_MODEL or OPENAI_MODEL. Reject a model that
+>      is not in the allowed list with a 400 error.
+> 5. Notes: when the local provider is used, split long texts into parts of
+>    LOCAL_PART_CHARS instead of 60000. Store "<provider>:<model>" in notes.model.
+> 6. API:
+>    - POST /api/materials/:id/notes and POST /api/ask accept optional provider
+>      (auto | local | openai) and model. /api/ask also returns the provider and
+>      model used.
+>    - GET /api/llm/models returns { default: { provider, localModel, openaiModel },
+>      allowExternal, local: { reachable, models: [{ name, size }] },
+>      openai: { configured, models: [names] } }. ?refresh=1 bypasses the cache.
+> 7. UI:
+>    - A settings panel showing the default provider, the "Allow external provider"
+>      state (read-only, from the server), Ollama availability and a "Refresh models"
+>      button.
+>    - Next to "Generate notes" and in the chat input: a provider selector (Auto,
+>      Local, OpenAI) and a model dropdown filled from /api/llm/models for the chosen
+>      provider; for Auto show both default models as a hint. Disable options that
+>      are unavailable and show why on hover.
+>    - Remember the last chosen provider and model per browser (localStorage).
+>    - Show a badge with "<provider>:<model>" under notes and under each answer.
+> 8. Tests (model calls and Ollama responses mocked): resolution rules (short/long
+>    text, Ollama unreachable, model not installed, ALLOW_EXTERNAL false, invalid
+>    model), filtering of embedding models from the list. Run npm test.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+**Summary:** Added switchable local (Ollama) or OpenAI provider and model selection: resolution rules, the cached local model list and one chat function in server/llm.js; provider and model on the notes and ask routes plus GET /api/llm/models (server/index.js, jobs.js, notes/generate.js, rag/answer.js); a settings dialog, picker and model badges in the client; new tests in tests/llm.test.js and tests/llm-api.test.js.
+
+**Type:** implementation
+
+**Git:** branch feature/llm-provider, changed files: 27
+
+**My changes and outcome:** 
+
+### 29/10/2026, 11:41:03
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Add selectable note styles, following docs/spec.md, section "Nadgradnja 5 – Slogi
+> povzetkov". Copy all style instructions and the merge instruction verbatim.
+> 
+> 1. server/notes/styles.js: one place that defines the styles (id, name, short
+>    description, system prompt): study-notes (default, the existing prompt), brief,
+>    outline, cheat-sheet, lecture-guide, simple.
+> 2. Long materials: keep the existing splitting into parts (60000 characters for
+>    OpenAI, LOCAL_PART_CHARS for local models) and group merging by 10. Each part
+>    uses the style's prompt plus the line "This is part {i} of {n}."; merging uses
+>    the merge instruction with the style's instructions inserted.
+> 3. Database: a material can have notes in several styles. Add a style column
+>    (default 'study-notes') and replace the unique constraint on material_id with a
+>    unique constraint on (material_id, style). Write a migration in server/db.js that
+>    keeps all existing notes as style 'study-notes'.
+> 4. API:
+>    - GET /api/note-styles returns [{ id, name, description }].
+>    - GET /api/materials/:id/notes returns a list of { style, status, content,
+>      model, error, createdAt } for all generated styles.
+>    - GET /api/materials/:id/notes/:style returns one style or 404.
+>    - POST /api/materials/:id/notes accepts { style, provider, model } (style
+>      defaults to study-notes) and starts generation in the background (202).
+>    - DELETE /api/materials/:id/notes/:style deletes notes in one style.
+>    Reject an unknown style with a 400 error.
+> 5. UI (Notes panel):
+>    - A style selector showing name and description for each style, with
+>      "Generate" / "Regenerate" next to the existing provider and model selectors.
+>    - Tabs for the styles already generated for this material, each with its status,
+>      the "<provider>:<model>" badge, "Copy" and "Delete".
+>    - Progress state per style while it is processing; generating one style must not
+>      block viewing others.
+>    - Remember the last chosen style per browser (localStorage).
+> 6. Tests (model calls mocked): each style uses its own prompt; long material uses
+>    the merge instruction with the style inserted; the migration keeps existing
+>    notes as study-notes; unknown style returns 400; two styles for the same
+>    material are stored separately. Run npm test and npm run build.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+**Summary:** Added selectable note styles: style prompts and merge instruction copied verbatim from the spec into server/notes/styles.js, style-aware generation, a notes.style column with a migration and UNIQUE (material_id, style) in server/db.js, style routes in server/index.js, per-style jobs in server/jobs.js, and style selection with tabs in client/src/components/NotesPanel.jsx. Tests are in tests/notes.test.js, tests/db-migration.test.js and tests/note-styles-api.test.js.
+
+**Type:** implementation
+
+**Git:** branch feature/note-styles, changed files: 33
+
+**My changes and outcome:** 

@@ -15,6 +15,21 @@ const MATERIALS_COLUMNS = `
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 `;
 
+// A material has notes in several styles, at most one row per style. Ids are never reused, so
+// a job for deleted notes can never write into notes created after them.
+const NOTES_COLUMNS = `
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  style TEXT NOT NULL DEFAULT 'study-notes',
+  content TEXT,                     -- Markdown
+  model TEXT,                       -- "<provider>:<model>"
+  status TEXT NOT NULL DEFAULT 'processing'
+    CHECK (status IN ('processing','ready','error')),
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (material_id, style)
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS courses (
   id INTEGER PRIMARY KEY,
@@ -22,16 +37,7 @@ CREATE TABLE IF NOT EXISTS courses (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE IF NOT EXISTS materials (${MATERIALS_COLUMNS});
-CREATE TABLE IF NOT EXISTS notes (
-  id INTEGER PRIMARY KEY,
-  material_id INTEGER NOT NULL UNIQUE REFERENCES materials(id) ON DELETE CASCADE,
-  content TEXT,                     -- Markdown
-  model TEXT,
-  status TEXT NOT NULL DEFAULT 'processing'
-    CHECK (status IN ('processing','ready','error')),
-  error TEXT,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+CREATE TABLE IF NOT EXISTS notes (${NOTES_COLUMNS});
 CREATE TABLE IF NOT EXISTS chunks (
   id INTEGER PRIMARY KEY,
   material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
@@ -56,6 +62,7 @@ export function getDb() {
   db.pragma('foreign_keys = ON');
   db.exec(SCHEMA);
   migrateMaterialsType(db);
+  migrateNotesStyle(db);
   // one vector per chunk; rowid = chunks.id
   db.exec(
     `CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vectors USING vec0(embedding float[${embedDim}]);`
@@ -87,6 +94,23 @@ function migrateMaterialsType(db) {
   } finally {
     db.pragma('foreign_keys = ON');
   }
+}
+
+// Databases created before note styles have one notes row per material (UNIQUE material_id).
+// The table is rebuilt with the style column and UNIQUE (material_id, style); existing notes
+// keep their ids and become style 'study-notes'. No table references notes, so foreign keys
+// can stay on.
+function migrateNotesStyle(db) {
+  const columns = db.pragma('table_info(notes)').map((column) => column.name);
+  if (columns.includes('style')) return;
+
+  db.transaction(() => {
+    db.exec(`CREATE TABLE notes_new (${NOTES_COLUMNS});
+      INSERT INTO notes_new (id, material_id, style, content, model, status, error, created_at)
+        SELECT id, material_id, 'study-notes', content, model, status, error, created_at FROM notes;
+      DROP TABLE notes;
+      ALTER TABLE notes_new RENAME TO notes;`);
+  })();
 }
 
 export function closeDb() {

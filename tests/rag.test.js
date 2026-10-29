@@ -196,22 +196,40 @@ test('answerQuestion calls the model and returns the answer with numbered source
   const first = addChunk(material, 0.1, 'ATP stores energy.');
   const second = addChunk(material, 0.2, 'Cells use ATP.');
   const calls = [];
-  const complete = async (args) => {
+  const resolve = async (args) => {
+    calls.push({ resolve: args });
+    return { provider: 'local', model: 'gemma3:4b' };
+  };
+  const chat = async (args) => {
     calls.push(args);
-    return ' ATP stores energy [1]. \n';
+    return { text: ' ATP stores energy [1]. \n', provider: args.provider, model: args.model };
   };
 
-  const result = await answerQuestion('What is ATP?', { complete, embed: questionEmbed });
+  const result = await answerQuestion('What is ATP?', {
+    provider: 'auto',
+    chat,
+    resolve,
+    embed: questionEmbed,
+  });
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].system, ANSWER_SYSTEM_PROMPT);
-  assert.equal(calls[0].maxOutputTokens, 4000);
-  assert.equal(
-    calls[0].user,
-    'Excerpts:\n[1] (Energy) ATP stores energy.\n[2] (Energy) Cells use ATP.\n\nQuestion: What is ATP?'
-  );
+  const user =
+    'Excerpts:\n[1] (Energy) ATP stores energy.\n[2] (Energy) Cells use ATP.\n\nQuestion: What is ATP?';
+  assert.equal(calls.length, 2);
+  // The provider is picked by the length of the whole prompt
+  assert.deepEqual(calls[0].resolve, {
+    provider: 'auto',
+    model: undefined,
+    textLength: ANSWER_SYSTEM_PROMPT.length + user.length,
+  });
+  assert.equal(calls[1].provider, 'local');
+  assert.equal(calls[1].model, 'gemma3:4b');
+  assert.equal(calls[1].system, ANSWER_SYSTEM_PROMPT);
+  assert.equal(calls[1].maxOutputTokens, 4000);
+  assert.equal(calls[1].user, user);
   assert.deepEqual(result, {
     answer: 'ATP stores energy [1].',
+    provider: 'local',
+    model: 'gemma3:4b',
     sources: [
       { n: 1, materialId: material, title: 'Energy', chunkId: first, text: 'ATP stores energy.' },
       { n: 2, materialId: material, title: 'Energy', chunkId: second, text: 'Cells use ATP.' },
@@ -220,8 +238,9 @@ test('answerQuestion calls the model and returns the answer with numbered source
 });
 
 test('without any excerpts the model is not called and the not-found answer is returned', async () => {
-  const complete = async () => assert.fail('model must not be called');
-  const result = await answerQuestion('Anything?', { complete, embed: questionEmbed });
-  assert.deepEqual(result, { answer: NOT_FOUND_ANSWER, sources: [] });
+  const chat = async () => assert.fail('model must not be called');
+  const resolve = async () => assert.fail('provider must not be resolved');
+  const result = await answerQuestion('Anything?', { chat, resolve, embed: questionEmbed });
+  assert.deepEqual(result, { answer: NOT_FOUND_ANSWER, sources: [], provider: null, model: null });
   assert.equal(NOT_FOUND_ANSWER, 'I could not find the answer in the materials.');
 });

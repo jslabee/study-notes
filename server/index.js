@@ -5,8 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
 import { enqueue, restoreJobs } from './jobs.js';
-import { EMBEDDING_UNREACHABLE_ERROR } from './llm.js';
+import { EMBEDDING_UNREACHABLE_ERROR, PROVIDERS, getLlmModels, resolveLlm } from './llm.js';
 import { answerQuestion } from './rag/answer.js';
+import { DEFAULT_STYLE, NOTE_STYLES, getStyle } from './notes/styles.js';
 import { convertToText, pdfToText } from './materials/convert.js';
 import {
   createMaterial,
@@ -73,12 +74,53 @@ function parseMaterialIds(value) {
   return ids;
 }
 
+// Optional provider (auto | local | openai) and model; omitted values use the defaults
+function parseLlmChoice(body) {
+  const provider = body?.provider;
+  const model = body?.model;
+  if (provider !== undefined && provider !== null && provider !== '' && !PROVIDERS.includes(provider)) {
+    throw httpError(400, 'provider must be auto, local or openai.');
+  }
+  if (model !== undefined && model !== null && typeof model !== 'string') {
+    throw httpError(400, 'model must be a string.');
+  }
+  return { provider: provider || undefined, model: model?.trim() || undefined };
+}
+
+// A note style id from the URL or the request body; a missing body style is the default
+function parseStyle(value, { optional = false } = {}) {
+  if (optional && (value === undefined || value === null || value === '')) return DEFAULT_STYLE;
+  if (typeof value !== 'string' || !getStyle(value)) {
+    throw httpError(400, `Unknown note style "${value}".`);
+  }
+  return value;
+}
+
+function requireMaterial(materialId) {
+  const material = getDb()
+    .prepare('SELECT id, length(content) AS length FROM materials WHERE id = ?')
+    .get(materialId);
+  if (!material) throw httpError(404, 'Material not found.');
+  return material;
+}
+
+const NOTES_FIELDS = 'style, status, content, model, error, created_at AS createdAt';
+const STYLE_ORDER = new Map(NOTE_STYLES.map((style, i) => [style.id, i]));
+
 export const app = express();
 
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/api/llm/models', async (req, res) => {
+  res.json(await getLlmModels({ refresh: req.query.refresh === '1' }));
+});
+
+app.get('/api/note-styles', (req, res) => {
+  res.json(NOTE_STYLES.map(({ id, name, description }) => ({ id, name, description })));
 });
 
 app.get('/api/courses', (req, res) => {
@@ -152,36 +194,64 @@ app.get('/api/materials/:id', (req, res) => {
   res.json(material);
 });
 
+// Notes of all generated styles, in the order the styles are defined
 app.get('/api/materials/:id/notes', (req, res) => {
+  const materialId = parseId(req.params.id, 'material id');
+  requireMaterial(materialId);
   const notes = getDb()
-    .prepare(
-      `SELECT status, content, model, error, created_at AS createdAt
-       FROM notes WHERE material_id = ?`
-    )
-    .get(parseId(req.params.id, 'material id'));
+    .prepare(`SELECT ${NOTES_FIELDS} FROM notes WHERE material_id = ?`)
+    .all(materialId)
+    .sort((a, b) => (STYLE_ORDER.get(a.style) ?? Infinity) - (STYLE_ORDER.get(b.style) ?? Infinity));
+  res.json(notes);
+});
+
+app.get('/api/materials/:id/notes/:style', (req, res) => {
+  const materialId = parseId(req.params.id, 'material id');
+  const style = parseStyle(req.params.style);
+  const notes = getDb()
+    .prepare(`SELECT ${NOTES_FIELDS} FROM notes WHERE material_id = ? AND style = ?`)
+    .get(materialId, style);
   if (!notes) throw httpError(404, 'Notes not found.');
   res.json(notes);
 });
 
-app.post('/api/materials/:id/notes', (req, res) => {
+app.post('/api/materials/:id/notes', async (req, res) => {
   const materialId = parseId(req.params.id, 'material id');
+  const style = parseStyle(req.body?.style, { optional: true });
+  const choice = parseLlmChoice(req.body);
+  const material = requireMaterial(materialId);
   const db = getDb();
-  if (!db.prepare('SELECT 1 FROM materials WHERE id = ?').get(materialId)) {
-    throw httpError(404, 'Material not found.');
-  }
 
-  // A request while notes are already being generated does not start a second job
-  const existing = db.prepare('SELECT status FROM notes WHERE material_id = ?').get(materialId);
+  // A request while notes in this style are already being generated does not start a second job
+  const existing = db
+    .prepare('SELECT status FROM notes WHERE material_id = ? AND style = ?')
+    .get(materialId, style);
   if (existing?.status !== 'processing') {
-    db.prepare(
-      `INSERT INTO notes (material_id) VALUES (?)
-       ON CONFLICT (material_id) DO UPDATE SET
-         content = NULL, model = NULL, status = 'processing', error = NULL,
-         created_at = CURRENT_TIMESTAMP`
-    ).run(materialId);
-    enqueue('notes', materialId);
+    // Resolved here, so an invalid or unavailable choice is reported before anything changes
+    const llm = await resolveLlm({ ...choice, textLength: material.length });
+    const { id } = db
+      .prepare(
+        `INSERT INTO notes (material_id, style) VALUES (?, ?)
+         ON CONFLICT (material_id, style) DO UPDATE SET
+           content = NULL, model = NULL, status = 'processing', error = NULL,
+           created_at = CURRENT_TIMESTAMP
+         RETURNING id`
+      )
+      .get(materialId, style);
+    enqueue('notes', id, llm);
   }
-  res.status(202).json({ status: 'processing' });
+  res.status(202).json({ style, status: 'processing' });
+});
+
+// A job that is still running for these notes finds no row and its result is discarded
+app.delete('/api/materials/:id/notes/:style', (req, res) => {
+  const materialId = parseId(req.params.id, 'material id');
+  const style = parseStyle(req.params.style);
+  const result = getDb()
+    .prepare('DELETE FROM notes WHERE material_id = ? AND style = ?')
+    .run(materialId, style);
+  if (result.changes === 0) throw httpError(404, 'Notes not found.');
+  res.json({ deleted: true });
 });
 
 app.delete('/api/materials/:id', (req, res) => {
@@ -205,10 +275,13 @@ app.post('/api/ask', async (req, res) => {
   }
 
   const materialIds = parseMaterialIds(req.body?.materialIds);
+  const choice = parseLlmChoice(req.body);
 
   try {
-    res.json(await answerQuestion(question, { courseId, materialIds }));
+    res.json(await answerQuestion(question, { courseId, materialIds, ...choice }));
   } catch (err) {
+    // Provider and model errors already carry their status
+    if (err.expose) throw err;
     // Failures of Ollama or OpenAI are reported with their readable message
     console.error(err);
     throw httpError(err.message === EMBEDDING_UNREACHABLE_ERROR ? 503 : 502, err.message);

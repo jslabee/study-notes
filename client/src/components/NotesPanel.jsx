@@ -1,14 +1,48 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { generateNotes, getNotes } from '../api.js'
+import { deleteNotes, generateNotes, getNoteStyles, getNotes } from '../api.js'
+import { useLlm } from '../llm.js'
 import { useToast } from '../toast.js'
+import ConfirmDialog from './ConfirmDialog.jsx'
 import EmptyState from './EmptyState.jsx'
 import ErrorState from './ErrorState.jsx'
 import Icon from './Icon.jsx'
+import LlmPicker from './LlmPicker.jsx'
+import ModelBadge from './ModelBadge.jsx'
 import Panel from './Panel.jsx'
 import Skeleton from './Skeleton.jsx'
+import Tabs from './Tabs.jsx'
 
 const REFRESH_MS = 3000
+const DEFAULT_STYLE = 'study-notes'
+const STYLE_STORAGE_KEY = 'study-notes.note-style'
+
+// The styles do not change while the app runs, so they are loaded once for all materials
+let stylesRequest = null
+function loadStyles() {
+  stylesRequest ??= getNoteStyles().catch((err) => {
+    stylesRequest = null
+    throw err
+  })
+  return stylesRequest
+}
+
+// The last chosen style is remembered per browser
+function readStoredStyle() {
+  try {
+    return localStorage.getItem(STYLE_STORAGE_KEY) || DEFAULT_STYLE
+  } catch {
+    return DEFAULT_STYLE
+  }
+}
+
+function storeStyle(style) {
+  try {
+    localStorage.setItem(STYLE_STORAGE_KEY, style)
+  } catch {
+    // The choice still applies until the page is reloaded
+  }
+}
 
 function NotesSkeleton() {
   return (
@@ -25,18 +59,65 @@ function NotesSkeleton() {
   )
 }
 
-// Notes of the material selected in the Sources panel; the Workspace renders it with key={id}
+function NotesProgress() {
+  return (
+    <div className="notes-progress" role="status">
+      <span className="notes-progress-label">
+        <span className="spinner spinner-large" aria-hidden="true" />
+        Generating notes...
+      </span>
+      <span className="progress-bar" aria-hidden="true">
+        <span />
+      </span>
+      <p className="small muted">
+        Long sources can take several minutes. You can view other styles and keep chatting in
+        the meantime.
+      </p>
+    </div>
+  )
+}
+
+// Status shown in a style's tab next to its name
+function TabStatus({ status }) {
+  if (status === 'processing') {
+    return (
+      <span className="spinner" role="img" aria-label="Generating" title="Generating" />
+    )
+  }
+  if (status === 'error') {
+    return (
+      <span className="notes-tab-error" role="img" aria-label="Failed" title="Failed">
+        <Icon name="alert" size={14} />
+      </span>
+    )
+  }
+  return null
+}
+
+// Notes of the material selected in the Sources panel, one tab per generated style;
+// the Workspace renders it with key={id}
 function NotesPanel({ material, onOpenSource, panelProps }) {
   const notify = useToast()
+  const { choice } = useLlm()
   const materialId = material?.id
-  const [notes, setNotes] = useState(undefined)
+  const [styles, setStyles] = useState(null)
+  const [notesList, setNotesList] = useState(undefined)
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(false)
+  const [selectedStyle, setSelectedStyle] = useState(readStoredStyle)
+  const [activeStyle, setActiveStyle] = useState(null)
+  const [deleting, setDeleting] = useState(null)
+
+  useEffect(() => {
+    loadStyles()
+      .then(setStyles)
+      .catch((err) => setError(err.message))
+  }, [])
 
   const load = useCallback(async () => {
     if (materialId === undefined) return
     try {
-      setNotes(await getNotes(materialId))
+      setNotesList(await getNotes(materialId))
       setError('')
     } catch (err) {
       setError(err.message)
@@ -47,32 +128,64 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
     load()
   }, [load])
 
-  // Refresh while the notes are being generated
-  const generating = notes?.status === 'processing'
+  // Refresh while any style is being generated
+  const anyProcessing = notesList?.some((n) => n.status === 'processing')
   useEffect(() => {
-    if (!generating) return
+    if (!anyProcessing) return
     const timer = setInterval(load, REFRESH_MS)
     return () => clearInterval(timer)
-  }, [generating, load])
+  }, [anyProcessing, load])
 
-  // Tell the user when generation they are waiting for has finished
-  const previousStatus = useRef(undefined)
+  const styleName = useCallback(
+    (id) => styles?.find((s) => s.id === id)?.name ?? id,
+    [styles]
+  )
+
+  // Tell the user when generation they are waiting for has finished, per style
+  const previousStatuses = useRef(null)
   const title = material?.title
   useEffect(() => {
-    const status = notes?.status
-    if (previousStatus.current === 'processing' && status === 'ready') {
-      notify(`Notes for "${title}" are ready.`)
-    } else if (previousStatus.current === 'processing' && status === 'error') {
-      notify(`Notes for "${title}" could not be generated.`, { type: 'error' })
+    if (!notesList) return
+    const previous = previousStatuses.current
+    if (previous) {
+      for (const notes of notesList) {
+        if (previous.get(notes.style) !== 'processing') continue
+        const label = `${styleName(notes.style)} for "${title}"`
+        if (notes.status === 'ready') notify(`${label} is ready.`)
+        if (notes.status === 'error') notify(`${label} could not be generated.`, { type: 'error' })
+      }
     }
-    previousStatus.current = status
-  }, [notes, notify, title])
+    previousStatuses.current = new Map(notesList.map((n) => [n.style, n.status]))
+  }, [notesList, notify, title, styleName])
 
-  async function handleGenerate() {
+  // A remembered style that no longer exists falls back to the default
+  const generateStyle = styles?.some((s) => s.id === selectedStyle) ? selectedStyle : DEFAULT_STYLE
+  const selectedInfo = styles?.find((s) => s.id === generateStyle)
+
+  // The open tab: the one the user picked, else the chosen style, else the first generated
+  const generated = notesList ?? []
+  const shownStyle =
+    [activeStyle, generateStyle].find((id) => generated.some((n) => n.style === id)) ??
+    generated[0]?.style ??
+    null
+  const shown = generated.find((n) => n.style === shownStyle) ?? null
+
+  const existing = generated.find((n) => n.style === generateStyle)
+  const generateBusy = starting || existing?.status === 'processing'
+
+  function selectStyle(id) {
+    setSelectedStyle(id)
+    storeStyle(id)
+    // Show that style's notes if it already has some
+    if (generated.some((n) => n.style === id)) setActiveStyle(id)
+  }
+
+  async function handleGenerate(style = generateStyle) {
     setError('')
     setStarting(true)
     try {
-      await generateNotes(materialId)
+      await generateNotes(materialId, { style, ...choice })
+      setActiveStyle(style)
       await load()
     } catch (err) {
       setError(err.message)
@@ -81,7 +194,7 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
     }
   }
 
-  async function handleCopy() {
+  async function handleCopy(notes) {
     try {
       await navigator.clipboard.writeText(notes.content)
       notify('Notes copied to the clipboard.')
@@ -90,21 +203,15 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
     }
   }
 
-  const ready = notes?.status === 'ready' && notes.content
-  const busy = generating || starting
+  async function confirmDelete() {
+    const style = deleting
+    await deleteNotes(materialId, style)
+    setDeleting(null)
+    notify(`${styleName(style)} for "${title}" was deleted.`)
+    await load()
+  }
 
-  const headerActions = material && (
-    <button
-      type="button"
-      className="icon-btn"
-      onClick={handleCopy}
-      disabled={!ready}
-      aria-label="Copy notes"
-      title="Copy notes"
-    >
-      <Icon name="copy" size={16} />
-    </button>
-  )
+  const tabsId = `notes-${materialId}`
 
   let body
   if (!material) {
@@ -113,7 +220,7 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
         Add a source, then click its title in the Sources panel to see its notes here.
       </EmptyState>
     )
-  } else if (error && notes === undefined) {
+  } else if (error && notesList === undefined) {
     body = (
       <ErrorState
         message={error}
@@ -123,62 +230,87 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
         }}
       />
     )
-  } else if (notes === undefined) {
+  } else if (notesList === undefined) {
     body = <NotesSkeleton />
-  } else if (busy) {
+  } else if (!shown) {
     body = (
-      <div className="notes-progress" role="status">
-        <span className="notes-progress-label">
-          <span className="spinner spinner-large" aria-hidden="true" />
-          Generating notes...
-        </span>
-        <span className="progress-bar" aria-hidden="true">
-          <span />
-        </span>
-        <p className="small muted">
-          Long sources can take several minutes. You can keep chatting in the meantime.
-        </p>
-      </div>
-    )
-  } else if (notes === null) {
-    body = (
-      <EmptyState
-        icon="spark"
-        title="No notes yet"
-        action={
-          <button type="button" className="btn btn-primary" onClick={handleGenerate}>
-            <Icon name="spark" size={16} />
-            Generate notes
-          </button>
-        }
-      >
-        Generate a summary, key points and terms from this source.
+      <EmptyState icon="spark" title="No notes yet">
+        Choose a style above and click Generate to create notes from this source.
       </EmptyState>
     )
-  } else if (notes.status === 'error') {
-    body = (
-      <ErrorState
-        message={`Notes could not be generated: ${notes.error || 'unknown error.'}`}
-        onRetry={handleGenerate}
-      />
-    )
   } else {
+    let content
+    if (shown.status === 'processing') {
+      content = <NotesProgress />
+    } else if (shown.status === 'error') {
+      content = (
+        <ErrorState
+          message={`Notes could not be generated: ${shown.error || 'unknown error.'}`}
+          onRetry={() => handleGenerate(shown.style)}
+        />
+      )
+    } else {
+      content = (
+        <article className="markdown notes-content">
+          <ReactMarkdown>{shown.content}</ReactMarkdown>
+        </article>
+      )
+    }
+
     body = (
-      <article className="markdown notes-content">
-        <ReactMarkdown>{notes.content}</ReactMarkdown>
-      </article>
+      <>
+        <Tabs
+          tabs={generated.map((notes) => ({
+            id: notes.style,
+            label: (
+              <>
+                {styleName(notes.style)}
+                <TabStatus status={notes.status} />
+              </>
+            ),
+          }))}
+          value={shown.style}
+          onChange={setActiveStyle}
+          label="Generated note styles"
+          idPrefix={tabsId}
+          className="tabs-underline notes-tabs"
+        />
+        <div
+          role="tabpanel"
+          id={`${tabsId}-panel-${shown.style}`}
+          aria-labelledby={`${tabsId}-tab-${shown.style}`}
+          className="notes-tabpanel"
+        >
+          <div className="notes-tab-toolbar">
+            {shown.status === 'ready' && <ModelBadge value={shown.model} />}
+            <span className="notes-tab-actions">
+              <button
+                type="button"
+                className="btn btn-small btn-ghost"
+                onClick={() => handleCopy(shown)}
+                disabled={shown.status !== 'ready' || !shown.content}
+              >
+                <Icon name="copy" size={14} />
+                Copy
+              </button>
+              <button
+                type="button"
+                className="btn btn-small btn-ghost"
+                onClick={() => setDeleting(shown.style)}
+              >
+                <Icon name="trash" size={14} />
+                Delete
+              </button>
+            </span>
+          </div>
+          {content}
+        </div>
+      </>
     )
   }
 
   return (
-    <Panel
-      title="Notes"
-      icon="notes"
-      side="right"
-      className="panel-notes"
-      headerActions={headerActions}
-      {...panelProps}
-    >
+    <Panel title="Notes" icon="notes" side="right" className="panel-notes" {...panelProps}>
       {material && (
         <div className="notes-source">
           <button
@@ -189,21 +321,59 @@ function NotesPanel({ material, onOpenSource, panelProps }) {
           >
             {material.title}
           </button>
-          {ready && (
-            <button type="button" className="btn btn-small" onClick={handleGenerate} disabled={busy}>
-              <Icon name="refresh" size={14} />
-              Regenerate
+        </div>
+      )}
+      {material && notesList !== undefined && (
+        <div className="notes-generate-bar">
+          <label className="notes-style-field">
+            <span className="visually-hidden">Note style</span>
+            <select
+              className="select"
+              value={generateStyle}
+              onChange={(e) => selectStyle(e.target.value)}
+              disabled={!styles}
+            >
+              {(styles ?? [{ id: generateStyle, name: 'Loading styles...' }]).map((style) => (
+                <option key={style.id} value={style.id}>
+                  {style.description ? `${style.name} – ${style.description}` : style.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedInfo && <p className="notes-style-description small muted">{selectedInfo.description}</p>}
+          <div className="notes-generate">
+            <LlmPicker />
+            <button
+              type="button"
+              className="btn btn-small btn-primary"
+              onClick={() => handleGenerate()}
+              disabled={!styles || generateBusy}
+              title={generateBusy ? 'This style is being generated.' : undefined}
+            >
+              <Icon name={existing ? 'refresh' : 'spark'} size={14} />
+              {existing ? 'Regenerate' : 'Generate'}
             </button>
-          )}
+          </div>
         </div>
       )}
       <div className="panel-body">
-        {error && notes !== undefined && <ErrorState message={error} compact />}
+        {error && notesList !== undefined && <ErrorState message={error} compact />}
         {material?.status === 'processing' && (
           <p className="notes-hint small muted">This source is still being processed.</p>
         )}
         {body}
       </div>
+
+      {deleting && (
+        <ConfirmDialog
+          title="Delete notes?"
+          message={`${styleName(deleting)} for "${title}" will be deleted. This cannot be undone.`}
+          confirmLabel="Delete"
+          busyLabel="Deleting..."
+          onConfirm={confirmDelete}
+          onClose={() => setDeleting(null)}
+        />
+      )}
     </Panel>
   )
 }
