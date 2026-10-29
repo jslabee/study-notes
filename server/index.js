@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getDb } from './db.js';
-import { enqueue, restoreJobs } from './jobs.js';
+import { enqueue, getNotesProgress, restoreJobs } from './jobs.js';
 import { EMBEDDING_UNREACHABLE_ERROR, PROVIDERS, getLlmModels, resolveLlm } from './llm.js';
 import { answerQuestion } from './rag/answer.js';
 import { DEFAULT_STYLE, NOTE_STYLES, getStyle } from './notes/styles.js';
@@ -107,6 +107,12 @@ function requireMaterial(materialId) {
 const NOTES_FIELDS = 'style, status, content, model, error, created_at AS createdAt';
 const STYLE_ORDER = new Map(NOTE_STYLES.map((style, i) => [style.id, i]));
 
+// Notes for the API: while they are being generated they include the job's progress
+// { phase, done, total, elapsedSeconds } (null when no job is known for them)
+function withProgress({ id, ...notes }) {
+  return notes.status === 'processing' ? { ...notes, progress: getNotesProgress(id) } : notes;
+}
+
 export const app = express();
 
 app.use(express.json());
@@ -199,20 +205,20 @@ app.get('/api/materials/:id/notes', (req, res) => {
   const materialId = parseId(req.params.id, 'material id');
   requireMaterial(materialId);
   const notes = getDb()
-    .prepare(`SELECT ${NOTES_FIELDS} FROM notes WHERE material_id = ?`)
+    .prepare(`SELECT id, ${NOTES_FIELDS} FROM notes WHERE material_id = ?`)
     .all(materialId)
     .sort((a, b) => (STYLE_ORDER.get(a.style) ?? Infinity) - (STYLE_ORDER.get(b.style) ?? Infinity));
-  res.json(notes);
+  res.json(notes.map(withProgress));
 });
 
 app.get('/api/materials/:id/notes/:style', (req, res) => {
   const materialId = parseId(req.params.id, 'material id');
   const style = parseStyle(req.params.style);
   const notes = getDb()
-    .prepare(`SELECT ${NOTES_FIELDS} FROM notes WHERE material_id = ? AND style = ?`)
+    .prepare(`SELECT id, ${NOTES_FIELDS} FROM notes WHERE material_id = ? AND style = ?`)
     .get(materialId, style);
   if (!notes) throw httpError(404, 'Notes not found.');
-  res.json(notes);
+  res.json(withProgress(notes));
 });
 
 app.post('/api/materials/:id/notes', async (req, res) => {

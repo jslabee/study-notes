@@ -745,3 +745,150 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch fix/local-context, changed files: 19
 
 **My changes and outcome:** 
+
+### 29/10/2026, 13:35:55
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Fix "The model response was incomplete (max_output_tokens)" for OpenAI. Change only
+> server/llm.js and server/notes/.
+> 
+> 1. Add OPENAI_MAX_OUTPUT_TOKENS (default 16000) and OPENAI_REASONING_EFFORT
+>    (optional, e.g. low; send the reasoning effort only if this variable is set) to
+>    .env.example and use them for OpenAI calls instead of the fixed 4000.
+> 2. When a response is incomplete because of the output limit, retry once with double
+>    the limit (capped at 32000). If it is still incomplete, split the input into
+>    smaller parts and continue with the normal part/merge procedure.
+> 3. Never save truncated text as finished notes. If all attempts fail, set the notes
+>    status to error with the message: "The model response was too long. Try another
+>    style or model, or increase OPENAI_MAX_OUTPUT_TOKENS."
+> 4. Log the token usage of each call (input, output, reasoning if available) to the
+>    server console to help diagnose limits.
+> 5. Tests with the API mocked: an incomplete response triggers one retry with a higher
+>    limit; a second incomplete response leads to splitting; truncated text is never
+>    stored as ready. Run npm test.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+**Summary:** OpenAI calls now use OPENAI_MAX_OUTPUT_TOKENS and the optional OPENAI_REASONING_EFFORT. A cut-off response is retried once at double the limit (at most 32000), then the input is split, failures give a clear error instead of saving cut-off text, and token usage is logged. Changes are in server/llm.js and server/notes/generate.js, with tests in tests/output-limit.test.js, tests/notes.test.js, tests/ask-api.test.js and tests/helpers/fake-openai.js.
+
+**Type:** bugfix
+
+**Git:** branch fix/local-context, changed files: 8
+
+**My changes and outcome:** 
+
+### 29/10/2026, 15:15:38
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Notes generation with the local model still fails during merging.
+> LOCAL_CONTEXT_TOKENS=16384 and OLLAMA_CONTEXT_LENGTH=16384 are set and match; the
+> error still occurs. Error from the server log:
+> 
+> Job notes 15 failed: LlmError: The material is too large for the local model's
+> context. ... at localChat (server/llm.js:419) ... at mergeGroup
+> (server/notes/generate.js:185) ... at reduceNotesToFit (server/notes/generate.js:99)
+> 
+> Find and fix the cause. Change only server/llm.js and server/notes/.
+> 
+> 1. Diagnose first: log, for every local call, the estimated input tokens, the
+>    actual prompt tokens reported by Ollama (prompt_eval_count or usage), the
+>    number of items in the merge group and LOCAL_CONTEXT_TOKENS. Explain in your
+>    summary which of these caused the failure.
+> 2. Make the token estimate conservative: use characters / 3 instead of / 4, and
+>    after each successful local call update the ratio from the actual token count
+>    reported by Ollama (keep the most conservative value seen).
+> 3. Remove the forced minimum of 2 items per merge group. If even two partial
+>    results do not fit, first shorten each partial result on its own with a
+>    "compress" call (same style instructions, plus: "Shorten this to at most half
+>    its length, keeping the structure and the most important points."), then merge.
+> 4. If a single partial result is still too large after compression, split it and
+>    compress the halves.
+> 5. Keep the clear error from before only as the last resort.
+> 6. Tests with the model mocked: two partial results that together exceed the limit
+>    are compressed before merging; the ratio is updated from reported token counts;
+>    no request exceeds LOCAL_CONTEXT_TOKENS. Run npm test.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+**Summary:** (no summary)
+
+**Type:** -
+
+**Git:** branch fix/local-merge, changed files: 10
+
+**My changes and outcome:** 
+
+### 29/10/2026, 16:23:55
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>b2bzj9ae1</task-id>
+> <tool-use-id>toolu_013EcepK5Sj8B3emQFFUbjeJ</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\b2bzj9ae1.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Generate outline notes for the whole failing material with the real model" completed (exit code 0)</summary>
+> </task-notification>
+
+**Summary:** The local notes failure was caused by the merge reply hitting LOCAL_MAX_OUTPUT_TOKENS (2048), not the context (real prompts used at most 8,556 of 16,384 tokens), and it was reported as a context error. Added per-call token logging, a /3 estimate that learns from Ollama's counts, compress calls instead of forced two-note groups, splitting and shortening of cut-off merges, and a separate output-limit error, in server/llm.js and server/notes/generate.js with tests in tests/notes.test.js, tests/llm.test.js and tests/helpers/fake-ollama.js.
+
+**Type:** bugfix
+
+**Git:** branch fix/local-merge, changed files: 10
+
+**My changes and outcome:** 
+
+### 29/10/2026, 16:51:45
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Show progress while notes are being generated, and fix the toolbar layout in the
+> Notes panel. Change only server/notes/, server/jobs.js, the notes API response and
+> the Notes panel UI.
+> 
+> 1. Track progress for each notes job: current phase (parts, compress, merge),
+>    completed calls and total planned calls (update the total when compression or
+>    extra merge levels are added), and elapsed time.
+> 2. GET /api/materials/:id/notes (and /notes/:style) include progress
+>    { phase, done, total, elapsedSeconds } while status is processing.
+> 3. Notes panel: show a progress bar with text like "Merging · 14 of 23 steps ·
+>    2 min 10 s", instead of the plain spinner.
+> 4. Log the total duration, number of calls and provider:model when a notes job
+>    finishes, so durations can be compared.
+> 5. Layout bug: in the Notes panel toolbar, when the provider is switched from
+>    Local to OpenAI, the model dropdown jumps to a new line. Fix it so the toolbar
+>    keeps a stable layout: style, provider and model selectors stay on one row with
+>    fixed or minimum widths, long model names are truncated with an ellipsis and the
+>    full name is shown in a tooltip, and the Generate button stays in place. Only if
+>    the panel is narrower than the controls need, wrap them in a consistent way
+>    (e.g. the selectors on one row and the button on the next), regardless of which
+>    provider is selected.
+> 6. Run npm test and npm run build, then check the toolbar at different Notes panel
+>    widths with Local and OpenAI selected.
+> Do not change other modules.
+> </pasted_content id="7e18">
+
+### 29/10/2026, 17:00:49
+
+**Prompt:**
+
+> <task-notification>
+> <task-id>bt0yn22ds</task-id>
+> <tool-use-id>toolu_01Y383niNGboX4YA9h2LwMQi</tool-use-id>
+> <output-file>C:\Users\UPORAB~1\AppData\Local\Temp\claude\C--Users-Uporabnik-Documents-diploma-aplikacija-study-notes\6ae3b27c-d26a-441e-a227-90c118517ca0\tasks\bt0yn22ds.output</output-file>
+> <status>failed</status>
+> <summary>Background command "Start the app server on a test port with the copied database" failed with exit code 127</summary>
+> </task-notification>
+
+**Summary:** Notes jobs now report progress (phase, steps done and planned, elapsed time) in the notes API, the Notes panel shows it as a progress bar with text, finished jobs log their duration, calls and model, and the Notes toolbar uses fixed grid columns with consistent wrapping so switching providers no longer moves controls. Changes are in server/notes/generate.js, server/jobs.js, server/index.js, client/src/components/NotesPanel.jsx, LlmPicker.jsx and styles/notes.css, with tests in tests/notes.test.js, tests/note-styles-api.test.js, tests/output-limit.test.js and the fake OpenAI helper.
+
+**Type:** implementation
+
+**Git:** branch fix/local-merge, changed files: 16
+
+**My changes and outcome:** 

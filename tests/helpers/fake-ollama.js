@@ -59,6 +59,13 @@ export function installFakeOllama({ dim = 8, models = [], answer = 'Local answer
             finish_reason: fake.finishReason ?? 'stop',
           },
         ],
+        // Prompt tokens at fake.charsPerToken (default 4); output tokens from fake.outputTokens
+        usage: {
+          prompt_tokens: Math.ceil(
+            body.messages.reduce((sum, m) => sum + m.content.length, 0) / (fake.charsPerToken ?? 4)
+          ),
+          completion_tokens: fake.outputTokens ?? 5,
+        },
       });
     }
 

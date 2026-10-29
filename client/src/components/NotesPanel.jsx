@@ -59,15 +59,57 @@ function NotesSkeleton() {
   )
 }
 
-function NotesProgress() {
+const PHASE_LABELS = {
+  queued: 'Waiting for another job',
+  parts: 'Summarizing parts',
+  compress: 'Shortening',
+  merge: 'Merging',
+}
+
+function formatElapsed(seconds) {
+  const minutes = Math.floor(seconds / 60)
+  return minutes ? `${minutes} min ${seconds % 60} s` : `${seconds} s`
+}
+
+// Counts on each second from the elapsed time the server reported; the parent gives it a new
+// key with every report, so it starts again from that value
+function Elapsed({ seconds }) {
+  const [extra, setExtra] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setExtra((value) => value + 1), 1000)
+    return () => clearInterval(timer)
+  }, [])
+  return formatElapsed(seconds + extra)
+}
+
+// Progress of the job from the server: { phase, done, total, elapsedSeconds }; without it (or
+// before any step is planned) the bar moves without a value
+function NotesProgress({ progress }) {
+  const planned = progress?.total > 0
+  const steps = planned ? `${progress.done} of ${progress.total} steps` : null
+  const label = progress ? PHASE_LABELS[progress.phase] ?? 'Generating notes' : 'Generating notes'
   return (
     <div className="notes-progress" role="status">
-      <span className="notes-progress-label">
-        <span className="spinner spinner-large" aria-hidden="true" />
-        Generating notes...
+      <span
+        className={`progress-bar${planned ? ' progress-bar-determinate' : ''}`}
+        role="progressbar"
+        aria-label="Notes progress"
+        aria-valuemin={planned ? 0 : undefined}
+        aria-valuemax={planned ? progress.total : undefined}
+        aria-valuenow={planned ? progress.done : undefined}
+        aria-valuetext={[label, steps].filter(Boolean).join(', ')}
+      >
+        <span style={planned ? { width: `${(progress.done / progress.total) * 100}%` } : undefined} />
       </span>
-      <span className="progress-bar" aria-hidden="true">
-        <span />
+      <span className="notes-progress-label">
+        {label}
+        {steps && <span className="notes-progress-steps"> · {steps}</span>}
+        {progress && (
+          <span className="notes-progress-time">
+            {' · '}
+            <Elapsed key={progress.elapsedSeconds} seconds={progress.elapsedSeconds} />
+          </span>
+        )}
       </span>
       <p className="small muted">
         Long sources can take several minutes. You can view other styles and keep chatting in
@@ -241,7 +283,7 @@ function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, 
   } else {
     let content
     if (shown.status === 'processing') {
-      content = <NotesProgress />
+      content = <NotesProgress progress={shown.progress} />
     } else if (shown.status === 'error') {
       content = (
         <ErrorState
@@ -345,27 +387,29 @@ function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, 
       )}
       {material && notesList !== undefined && (
         <div className="notes-generate-bar">
-          <label className="notes-style-field">
-            <span className="visually-hidden">Note style</span>
-            <select
-              className="select"
-              value={generateStyle}
-              onChange={(e) => selectStyle(e.target.value)}
-              disabled={!styles}
-            >
-              {(styles ?? [{ id: generateStyle, name: 'Loading styles...' }]).map((style) => (
-                <option key={style.id} value={style.id}>
-                  {style.description ? `${style.name} – ${style.description}` : style.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {selectedInfo && <p className="notes-style-description small muted">{selectedInfo.description}</p>}
+          {/* Style, provider, model and the button sit in fixed grid columns, so the row does
+              not change with the selected provider or the length of a model name */}
           <div className="notes-generate">
+            <label className="notes-style-field">
+              <span className="visually-hidden">Note style</span>
+              <select
+                className="select select-small"
+                value={generateStyle}
+                onChange={(e) => selectStyle(e.target.value)}
+                disabled={!styles}
+                title={selectedInfo ? `${selectedInfo.name} – ${selectedInfo.description}` : undefined}
+              >
+                {(styles ?? [{ id: generateStyle, name: 'Loading styles...' }]).map((style) => (
+                  <option key={style.id} value={style.id}>
+                    {style.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <LlmPicker />
             <button
               type="button"
-              className="btn btn-small btn-primary"
+              className="btn btn-small btn-primary notes-generate-button"
               onClick={() => handleGenerate()}
               disabled={!styles || generateBusy}
               title={generateBusy ? 'This style is being generated.' : undefined}
@@ -374,6 +418,7 @@ function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, 
               {existing ? 'Regenerate' : 'Generate'}
             </button>
           </div>
+          {selectedInfo && <p className="notes-style-description small muted">{selectedInfo.description}</p>}
         </div>
       )}
       <div className="panel-body">

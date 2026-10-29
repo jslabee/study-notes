@@ -35,15 +35,51 @@ export function llmConfig() {
     localPartChars: positiveInt('LOCAL_PART_CHARS', 15000),
     localContextTokens: positiveInt('LOCAL_CONTEXT_TOKENS', 16384),
     localMaxOutputTokens: positiveInt('LOCAL_MAX_OUTPUT_TOKENS', 2048),
+    openaiMaxOutputTokens: positiveInt('OPENAI_MAX_OUTPUT_TOKENS', 16000),
+    openaiReasoningEffort: process.env.OPENAI_REASONING_EFFORT?.trim() || '',
   };
+}
+
+const OUTPUT_TOKENS_CAP = 32000;
+export const OUTPUT_TOO_LONG_ERROR =
+  'The model response was too long. Try another style or model, or increase OPENAI_MAX_OUTPUT_TOKENS.';
+
+export const LOCAL_OUTPUT_TOO_LONG_ERROR =
+  "The local model's response was too long. Try another style or model, or increase LOCAL_MAX_OUTPUT_TOKENS.";
+
+// The response did not fit the output limit (for OpenAI even after a retry with a higher
+// limit); callers can split or shorten the input
+export class OutputLimitError extends LlmError {
+  constructor(message = OUTPUT_TOO_LONG_ERROR) {
+    super(422, message);
+  }
 }
 
 export const LOCAL_CONTEXT_ERROR =
   "The material is too large for the local model's context. Use Auto or OpenAI, or increase LOCAL_CONTEXT_TOKENS and OLLAMA_CONTEXT_LENGTH.";
 const CONTEXT_SAFETY_MARGIN = 0.1;
 
-// A rough token count: about four characters per token
-export const estimateTokens = (text) => Math.ceil(text.length / 4);
+// Characters per token for the estimate: 3 at first (conservative), lowered when Ollama reports
+// that a prompt had more tokens than that; it is never raised again
+const INITIAL_CHARS_PER_TOKEN = 3;
+let charsPerToken = INITIAL_CHARS_PER_TOKEN;
+
+export const tokenRatio = () => charsPerToken;
+
+// Starts again from 3 characters per token (used by tests)
+export function resetTokenRatio() {
+  charsPerToken = INITIAL_CHARS_PER_TOKEN;
+}
+
+// Keeps the most conservative ratio seen: chars sent / prompt tokens reported by Ollama. Only
+// prompts of at least 1/16 of the context count: in short ones the chat template's own tokens
+// would make the ratio far too low
+function updateTokenRatio(chars, promptTokens, contextTokens) {
+  if (!(chars > 0) || !(promptTokens >= contextTokens / 16)) return;
+  charsPerToken = Math.min(charsPerToken, chars / promptTokens);
+}
+
+export const estimateTokens = (text) => Math.ceil(text.length / charsPerToken);
 
 // Whether a local request fits LOCAL_CONTEXT_TOKENS: the estimated input (system prompt and user
 // message) plus LOCAL_MAX_OUTPUT_TOKENS, with a 10% safety margin
@@ -304,8 +340,14 @@ export async function withRetries(
   }
 }
 
-async function openaiChat({ model, system, user, maxOutputTokens }) {
-  const openai = getOpenaiClient();
+// Token usage of every call goes to the server console, to help diagnose limits
+function logUsage(provider, model, { input, output, reasoning }, note = '') {
+  const parts = [`input ${input ?? '?'}`, `output ${output ?? '?'}`];
+  if (reasoning !== undefined) parts.push(`reasoning ${reasoning}`);
+  console.log(`[llm] ${provider} ${model}: ${parts.join(', ')} tokens${note ? ` (${note})` : ''}`);
+}
+
+async function openaiRequest(openai, { model, system, user, maxOutputTokens, reasoningEffort }) {
   let response;
   try {
     response = await withRetries(() =>
@@ -314,11 +356,47 @@ async function openaiChat({ model, system, user, maxOutputTokens }) {
         instructions: system,
         input: user,
         max_output_tokens: maxOutputTokens,
+        ...(reasoningEffort && { reasoning: { effort: reasoningEffort } }),
       })
     );
   } catch (err) {
     throw readableOpenaiError(err, model);
   }
+
+  const usage = response.usage;
+  const cutOff =
+    response.status === 'incomplete' &&
+    response.incomplete_details?.reason === 'max_output_tokens';
+  logUsage(
+    'openai',
+    model,
+    {
+      input: usage?.input_tokens,
+      output: usage?.output_tokens,
+      reasoning: usage?.output_tokens_details?.reasoning_tokens,
+    },
+    `limit ${maxOutputTokens}${cutOff ? ', incomplete' : ''}`
+  );
+  return { response, cutOff };
+}
+
+// OpenAI calls use OPENAI_MAX_OUTPUT_TOKENS (and OPENAI_REASONING_EFFORT when set). A response cut
+// off by the output limit is retried once with double the limit (at most 32000); if it is still
+// cut off, OutputLimitError is thrown, so truncated text is never returned
+async function openaiChat({ model, system, user }) {
+  const openai = getOpenaiClient();
+  const { openaiMaxOutputTokens, openaiReasoningEffort } = llmConfig();
+  const request = { model, system, user, reasoningEffort: openaiReasoningEffort };
+
+  let { response, cutOff } = await openaiRequest(openai, {
+    ...request,
+    maxOutputTokens: openaiMaxOutputTokens,
+  });
+  const higherLimit = Math.min(openaiMaxOutputTokens * 2, OUTPUT_TOKENS_CAP);
+  if (cutOff && higherLimit > openaiMaxOutputTokens) {
+    ({ response, cutOff } = await openaiRequest(openai, { ...request, maxOutputTokens: higherLimit }));
+  }
+  if (cutOff) throw new OutputLimitError();
 
   if (response.status === 'incomplete') {
     const reason = response.incomplete_details?.reason || 'unknown reason';
@@ -328,10 +406,22 @@ async function openaiChat({ model, system, user, maxOutputTokens }) {
 }
 
 // Local calls always use LOCAL_MAX_OUTPUT_TOKENS, and a request that does not fit
-// LOCAL_CONTEXT_TOKENS is not sent (callers split the text so that it fits)
-async function localChat({ model, system, user }) {
-  const { localMaxOutputTokens } = llmConfig();
-  if (!fitsLocalContext(system, user)) throw new LlmError(422, LOCAL_CONTEXT_ERROR);
+// LOCAL_CONTEXT_TOKENS is not sent (callers split the text so that it fits). Every call logs the
+// estimated and reported prompt tokens, so the estimate can be compared with the real count.
+async function localChat({ model, system, user, purpose }) {
+  const { localMaxOutputTokens, localContextTokens } = llmConfig();
+  const estimated = estimateTokens(system) + estimateTokens(user);
+  const fits = fitsLocalContext(system, user);
+  const logCall = (fields) =>
+    console.log(
+      `[llm] local ${model}${purpose ? ` ${purpose}` : ''}: ` +
+        `estimated input ${estimated} tokens (${charsPerToken.toFixed(2)} chars/token), ${fields}, ` +
+        `max output ${localMaxOutputTokens}, LOCAL_CONTEXT_TOKENS ${localContextTokens}`
+    );
+  if (!fits) {
+    logCall('not sent');
+    throw new LlmError(422, LOCAL_CONTEXT_ERROR);
+  }
 
   const ollama = getLocalClient();
   let response;
@@ -352,21 +442,36 @@ async function localChat({ model, system, user }) {
     throw readableLocalError(err, model);
   }
 
-  // Ollama also stops here when its own context (OLLAMA_CONTEXT_LENGTH) runs out
   const choice = response.choices?.[0];
-  if (choice?.finish_reason === 'length') throw new LlmError(422, LOCAL_CONTEXT_ERROR);
+  const promptTokens = response.usage?.prompt_tokens;
+  const outputTokens = response.usage?.completion_tokens;
+  logCall(
+    `reported prompt ${promptTokens ?? '?'}, output ${outputTokens ?? '?'} tokens, ` +
+      `finish ${choice?.finish_reason ?? '?'}`
+  );
+  updateTokenRatio(system.length + user.length, promptTokens, localContextTokens);
+
+  // "length" means the reply was cut off: by the output limit when it used all of it,
+  // otherwise because Ollama's own context (OLLAMA_CONTEXT_LENGTH) ran out
+  if (choice?.finish_reason === 'length') {
+    if (outputTokens === undefined || outputTokens >= localMaxOutputTokens) {
+      throw new OutputLimitError(LOCAL_OUTPUT_TOO_LONG_ERROR);
+    }
+    throw new LlmError(422, LOCAL_CONTEXT_ERROR);
+  }
   return choice?.message?.content;
 }
 
 // Sends a system instruction and a user message to the resolved provider and model;
-// returns the text reply and the provider and model that produced it
-export async function chat({ provider, model, system, user, maxOutputTokens }) {
+// returns the text reply and the provider and model that produced it. purpose (e.g. "merge of
+// 4 notes") only goes into the log.
+export async function chat({ provider, model, system, user, maxOutputTokens, purpose }) {
   if (provider !== 'local' && provider !== 'openai') {
     throw new Error(`Unknown provider "${provider}".`);
   }
   const text =
     provider === 'local'
-      ? await localChat({ model, system, user, maxOutputTokens })
+      ? await localChat({ model, system, user, purpose })
       : await openaiChat({ model, system, user, maxOutputTokens });
   if (!text?.trim()) throw new Error('The model returned an empty response.');
   return { text, provider, model };

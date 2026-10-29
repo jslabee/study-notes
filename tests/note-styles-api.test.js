@@ -135,6 +135,45 @@ test('notes deleted while waiting for their job are not generated', async () => 
   assert.equal(getDb().prepare("SELECT count(*) AS n FROM notes WHERE style = 'simple'").get().n, 0);
 });
 
+test('notes being generated include their progress; waiting notes are queued', async () => {
+  // OpenAI answers wait until the gate is opened, so the jobs can be seen while they run
+  let open;
+  fakeOpenAI.wait = new Promise((resolve) => (open = resolve));
+  const start = (style) =>
+    fetch(notesUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ style, provider: 'openai' }),
+    });
+
+  try {
+    fakeOpenAI.answer = '## Notes';
+    await start('cheat-sheet');
+    await start('lecture-guide');
+    let running;
+    for (let i = 0; i < 50 && running?.progress?.phase !== 'parts'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      running = await (await fetch(notesUrl('/cheat-sheet'))).json();
+    }
+    assert.equal(running.status, 'processing');
+    assert.deepEqual(running.progress, { phase: 'parts', done: 0, total: 1, elapsedSeconds: 0 });
+
+    const list = await (await fetch(notesUrl())).json();
+    const waiting = list.find((n) => n.style === 'lecture-guide');
+    assert.deepEqual(waiting.progress, { phase: 'queued', done: 0, total: 0, elapsedSeconds: 0 });
+    assert.ok(list.every((n) => !('id' in n)));
+    assert.ok(list.filter((n) => n.status !== 'processing').every((n) => !('progress' in n)));
+  } finally {
+    open();
+    await whenIdle();
+    delete fakeOpenAI.wait;
+  }
+
+  const done = await (await fetch(notesUrl('/cheat-sheet'))).json();
+  assert.equal(done.status, 'ready');
+  assert.ok(!('progress' in done));
+});
+
 test('an unknown style is rejected with 400', async () => {
   const expected = { error: 'Unknown note style "poem".' };
   let res = await fetch(notesUrl(), {

@@ -91,7 +91,8 @@ test('the OpenAI request uses the spec prompt and numbered excerpts matching sou
   const request = fakeOpenAI.requests[0].body;
   assert.equal(request.model, 'test-model');
   assert.equal(request.instructions, ANSWER_SYSTEM_PROMPT);
-  assert.equal(request.max_output_tokens, 4000);
+  assert.equal(request.max_output_tokens, 16000);
+  assert.equal(request.reasoning, undefined);
   const expectedInput =
     'Excerpts:\n' +
     body.sources.map((s) => `[${s.n}] (${s.title}) ${s.text}`).join('\n') +

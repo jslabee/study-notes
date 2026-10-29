@@ -231,6 +231,7 @@ function withLocalTokens(context, output, fn) {
     if (context) process.env.LOCAL_CONTEXT_TOKENS = String(context);
     if (output) process.env.LOCAL_MAX_OUTPUT_TOKENS = String(output);
     fake.chatRequests.length = 0;
+    llm.resetTokenRatio();
     try {
       await fn();
     } finally {
@@ -238,24 +239,76 @@ function withLocalTokens(context, output, fn) {
       delete process.env.LOCAL_MAX_OUTPUT_TOKENS;
       delete fake.chatError;
       delete fake.finishReason;
+      delete fake.charsPerToken;
+      delete fake.outputTokens;
+      llm.resetTokenRatio();
     }
   };
 }
 
-test('the local context defaults to 16384 tokens with 2048 output tokens', () => {
+test('the local context defaults to 16384 tokens with 2048 output tokens', withLocalTokens(null, null, () => {
   const config = llm.llmConfig();
   assert.equal(config.localContextTokens, 16384);
   assert.equal(config.localMaxOutputTokens, 2048);
-  assert.equal(llm.estimateTokens('a'.repeat(400)), 100);
+  // Conservative estimate: three characters per token
+  assert.equal(llm.tokenRatio(), 3);
+  assert.equal(llm.estimateTokens('a'.repeat(300)), 100);
   assert.equal(llm.estimateTokens('abcde'), 2);
-});
+}));
 
 test(
   'a request fits when input + output tokens + 10% fit into LOCAL_CONTEXT_TOKENS',
   withLocalTokens(11000, 1000, () => {
-    // (input + 1000) * 1.1 <= 11000 allows about 9000 input tokens (36,000 characters)
-    assert.ok(llm.fitsLocalContext('a'.repeat(4000), 'b'.repeat(31800)));
-    assert.ok(!llm.fitsLocalContext('a'.repeat(4000), 'b'.repeat(32200)));
+    // (input + 1000) * 1.1 <= 11000 allows about 9000 input tokens (27,000 characters)
+    assert.ok(llm.fitsLocalContext('a'.repeat(3000), 'b'.repeat(23700)));
+    assert.ok(!llm.fitsLocalContext('a'.repeat(3000), 'b'.repeat(24300)));
+  })
+);
+
+test(
+  'the ratio follows the prompt tokens reported by Ollama and keeps the most conservative value',
+  withLocalTokens(null, null, async () => {
+    const send = (chars) =>
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'x'.repeat(chars - 1) });
+
+    // 6000 characters reported as 3000 tokens: 2 characters per token
+    fake.charsPerToken = 2;
+    await send(6000);
+    assert.equal(llm.tokenRatio(), 2);
+    assert.equal(llm.estimateTokens('a'.repeat(300)), 150);
+
+    // A less conservative count later does not raise it again
+    fake.charsPerToken = 5;
+    await send(6000);
+    assert.equal(llm.tokenRatio(), 2);
+
+    // Short prompts are mostly chat template tokens and do not count
+    fake.charsPerToken = 0.5;
+    await send(100);
+    assert.equal(llm.tokenRatio(), 2);
+  })
+);
+
+test(
+  'every local call logs the estimated and reported tokens, its purpose and LOCAL_CONTEXT_TOKENS',
+  withLocalTokens(null, null, async (t) => {
+    const log = mock.method(console, 'log', () => {});
+    try {
+      fake.charsPerToken = 4;
+      await llm.chat({
+        provider: 'local',
+        model: 'gemma3:4b',
+        system: 'S',
+        user: 'x'.repeat(5999),
+        purpose: 'merge of 4 notes',
+      });
+    } finally {
+      log.mock.restore();
+    }
+    assert.deepEqual(log.mock.calls.map((c) => c.arguments[0]), [
+      '[llm] local gemma3:4b merge of 4 notes: estimated input 2001 tokens (3.00 chars/token), ' +
+        'reported prompt 1500, output 5 tokens, finish stop, max output 2048, LOCAL_CONTEXT_TOKENS 16384',
+    ]);
   })
 );
 
@@ -293,9 +346,26 @@ test(
 );
 
 test(
-  'a reply cut off by the token limit gives the local context message',
+  'a reply that used all LOCAL_MAX_OUTPUT_TOKENS is an output limit error, not a context error',
   withLocalTokens(null, null, async () => {
     fake.finishReason = 'length';
+    fake.outputTokens = 2048;
+    await assert.rejects(
+      llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
+      (err) => {
+        assert.ok(err instanceof llm.OutputLimitError);
+        assert.equal(err.message, llm.LOCAL_OUTPUT_TOO_LONG_ERROR);
+        return true;
+      }
+    );
+  })
+);
+
+test(
+  'a reply cut off before the output limit means Ollama ran out of context',
+  withLocalTokens(null, null, async () => {
+    fake.finishReason = 'length';
+    fake.outputTokens = 700;
     await rejectsWith(
       llm.chat({ provider: 'local', model: 'gemma3:4b', system: 'S', user: 'U' }),
       422,

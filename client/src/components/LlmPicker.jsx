@@ -36,11 +36,14 @@ function LlmPicker({ disabled = false }) {
     modelOptions = <option value="">{info ? 'No models' : 'Loading models...'}</option>
     modelTitle = reason || undefined
   } else {
+    const label = (m) => (m.size ? `${m.name} (${formatModelSize(m.size)})` : m.name)
     modelOptions = models.map((m) => (
       <option key={m.name} value={m.name}>
-        {m.size ? `${m.name} (${formatModelSize(m.size)})` : m.name}
+        {label(m)}
       </option>
     ))
+    // A long name may be cut off in the select, so the full name is the tooltip
+    modelTitle = label(models.find((m) => m.name === choice.model) ?? models[0])
   }
 
   return (
