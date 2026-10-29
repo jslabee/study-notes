@@ -76,8 +76,13 @@ function llmChoice({ provider, model } = {}) {
   return body
 }
 
-export function generateNotes(materialId, { style, ...choice } = {}) {
-  return postJson(`/api/materials/${materialId}/notes`, { style, ...llmChoice(choice) })
+// redetect (by-chapter only): detect the chapters again instead of using the ones found before
+export function generateNotes(materialId, { style, redetect, ...choice } = {}) {
+  return postJson(`/api/materials/${materialId}/notes`, {
+    style,
+    ...(redetect && { redetect: true }),
+    ...llmChoice(choice),
+  })
 }
 
 export function deleteNotes(materialId, style) {

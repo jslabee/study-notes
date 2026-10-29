@@ -1,4 +1,4 @@
-import { extractTextItems } from 'unpdf';
+import { extractTextItems, getDocumentProxy } from 'unpdf';
 
 const TIMESTAMP_LINE = /-->/;
 const SENTENCE_END = /[.!?]["')\]]?$/;
@@ -10,6 +10,7 @@ const PAGE_NUMBER_LINE = /^(?:page\s+)?\d+(?:\s*(?:\/|of)\s*\d+)?$|^[-–—]\s*
 const PAGE_EDGE_LINES = 2;
 // A vertical gap larger than this many font sizes between two lines starts a new paragraph
 const PARAGRAPH_GAP = 1.5;
+const PARAGRAPH_BREAK = '\n\n';
 
 export const NO_TEXT_ERROR = 'The file contains no readable text.';
 export const NO_PDF_TEXT_ERROR =
@@ -72,17 +73,56 @@ function subtitlesToText(input) {
 
 // Extracts the text of all pages of a PDF and cleans it; asynchronous because unpdf is
 export async function pdfToText(buffer) {
+  return (await pdfToTextWithPages(buffer)).text;
+}
+
+// Like pdfToText, also returns pageOffsets (the offset in the text where each page starts) and
+// outline: the top-level entries of the PDF outline (bookmarks) as [{ title, start }], with the
+// offset where the entry's page starts ([] when the PDF has no outline)
+export async function pdfToTextWithPages(buffer) {
+  let pdf;
   let pages;
   try {
-    ({ items: pages } = await extractTextItems(new Uint8Array(buffer)));
+    pdf = await getDocumentProxy(new Uint8Array(buffer));
+    ({ items: pages } = await extractTextItems(pdf));
   } catch {
     throw new Error(INVALID_PDF_ERROR);
   }
 
-  const text = cleanPdfPages(pages.map(itemsToLines));
+  const result = cleanPdfPagesWithOffsets(pages.map(itemsToLines));
   // A scanned document has no text layer, so nothing is extracted
-  if (!text.trim()) throw new Error(NO_PDF_TEXT_ERROR);
-  return text;
+  if (!result.text.trim()) throw new Error(NO_PDF_TEXT_ERROR);
+  // A broken outline only means there are no chapters from it
+  const entries = await readOutline(pdf).catch(() => []);
+  return { ...result, outline: outlineToChapters(entries, result.pageOffsets) };
+}
+
+// Top-level outline entries with the index (from 0) of the page they point to; entries whose
+// page cannot be resolved are left out
+async function readOutline(pdf) {
+  const entries = [];
+  for (const item of (await pdf.getOutline()) ?? []) {
+    try {
+      // A destination is an array [page, ...] or the name of one
+      const dest = typeof item.dest === 'string' ? await pdf.getDestination(item.dest) : item.dest;
+      if (!Array.isArray(dest)) continue;
+      const pageIndex = Number.isInteger(dest[0]) ? dest[0] : await pdf.getPageIndex(dest[0]);
+      entries.push({ title: item.title, pageIndex });
+    } catch {
+      // An entry with a broken destination is skipped
+    }
+  }
+  return entries;
+}
+
+// Maps outline entries ({ title, pageIndex }) to chapters [{ title, start }], where start is the
+// offset in the cleaned text where the entry's page starts
+export function outlineToChapters(entries, pageOffsets) {
+  return entries.flatMap(({ title, pageIndex }) => {
+    const clean = String(title ?? '').replace(/\s+/g, ' ').trim();
+    const start = pageOffsets[pageIndex];
+    return clean && Number.isInteger(start) ? [{ title: clean, start }] : [];
+  });
 }
 
 // Groups the text items of one page into lines; an empty string marks a paragraph break
@@ -116,6 +156,12 @@ function itemsToLines(items) {
 
 // Cleans the lines of all pages (arrays of strings, '' = paragraph break) into paragraphs
 export function cleanPdfPages(pages) {
+  return cleanPdfPagesWithOffsets(pages).text;
+}
+
+// Like cleanPdfPages, also returns pageOffsets: for every page, the offset in the text where its
+// first remaining line starts (the end of the text for pages with no text left)
+export function cleanPdfPagesWithOffsets(pages) {
   const trimmed = pages.map((lines) => lines.map((line) => line.trim()));
 
   // Headers and footers: a line that appears identically on more than half of the pages
@@ -128,6 +174,8 @@ export function cleanPdfPages(pages) {
   const repeated = (line) => trimmed.length > 1 && pageCounts.get(line) > trimmed.length / 2;
 
   const lines = [];
+  // Index in lines of the first line of every page
+  const pageStarts = [];
   for (const pageLines of trimmed) {
     const kept = pageLines.filter((line) => !line || !repeated(line));
     // Standalone page numbers at the top or bottom of the page
@@ -138,29 +186,50 @@ export function cleanPdfPages(pages) {
     ]);
     // A page that ends with a finished sentence also ends the paragraph
     if (SENTENCE_END.test(lines.at(-1) ?? '')) lines.push('');
-    lines.push(...kept.filter((line, i) => !(edges.has(i) && PAGE_NUMBER_LINE.test(line))));
+    pageStarts.push(lines.length);
+    // Whitespace inside a line is collapsed here, so the paragraphs need no changes later
+    // and the offsets of lines in them stay exact
+    lines.push(
+      ...kept
+        .filter((line, i) => !(edges.has(i) && PAGE_NUMBER_LINE.test(line)))
+        .map((line) => line.replace(/\s+/g, ' '))
+    );
   }
 
-  // Merge lines into paragraphs and join words hyphenated at line ends
+  // Merge lines into paragraphs and join words hyphenated at line ends. lineOffsets has the
+  // offset in the result where every line starts.
   const paragraphs = [];
+  const lineOffsets = [];
+  let length = 0;
   let current = '';
+  const paragraphStart = () => (paragraphs.length > 0 ? length + PARAGRAPH_BREAK.length : 0);
+  const closeParagraph = () => {
+    if (!current) return;
+    length = paragraphStart() + current.length;
+    paragraphs.push(current);
+    current = '';
+  };
   for (const line of lines) {
     if (!line) {
-      if (current) paragraphs.push(current);
-      current = '';
+      closeParagraph();
+      lineOffsets.push(null);
     } else if (/\p{L}-$/u.test(current) && /^\p{Ll}/u.test(line)) {
+      lineOffsets.push(paragraphStart() + current.length - 1);
       current = current.slice(0, -1) + line;
     } else if (/\p{L}-$/u.test(current) && /^\p{Lu}/u.test(line)) {
       // A hyphenated name or compound like "Smith-Jones" keeps its hyphen
+      lineOffsets.push(paragraphStart() + current.length);
       current += line;
     } else {
+      lineOffsets.push(paragraphStart() + (current ? current.length + 1 : 0));
       current = current ? `${current} ${line}` : line;
     }
   }
-  if (current) paragraphs.push(current);
+  closeParagraph();
 
-  return paragraphs
-    .map((paragraph) => paragraph.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
-    .join('\n\n');
+  const text = paragraphs.join(PARAGRAPH_BREAK);
+  const pageOffsets = pageStarts.map(
+    (start) => lineOffsets.slice(start).find((offset) => offset !== null) ?? text.length
+  );
+  return { text, pageOffsets };
 }

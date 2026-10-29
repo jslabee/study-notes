@@ -5,7 +5,15 @@ import {
   chat as llmChat,
   llmConfig,
 } from '../llm.js';
-import { DEFAULT_STYLE, getStyle, mergePrompt } from './styles.js';
+import { chapterTexts, detectChapters, loadChunks } from './chapters.js';
+import {
+  CHAPTER_STYLE,
+  DEFAULT_STYLE,
+  OVERVIEW_PROMPT,
+  chapterPrompt,
+  getStyle,
+  mergePrompt,
+} from './styles.js';
 
 export const MAX_PART_CHARS = 60000;
 export const GROUP_SIZE = 10;
@@ -93,14 +101,21 @@ const MIN_SHORTENING = 0.1;
 const ESTIMATED_NOTES_SHARE = 0.25;
 
 // Counts the model calls of a notes job for its progress: the current phase (parts, compress,
-// merge), the calls done and the calls planned. The plan is an estimate; it is updated when
-// parts are split, notes are shortened, merges are split or another merge level is needed.
+// merge, overview), the calls done and the calls planned. The plan is an estimate; it is updated
+// when parts are split, notes are shortened, merges are split or another merge level is needed.
+// For by-chapter notes it also has the chapter being summarized: { kind, number, count }, kind
+// "chapter", or "part" when no chapters were found; it is left out otherwise.
 export function createProgress(onProgress = () => {}) {
   const state = { phase: 'parts', done: 0, total: 0 };
   const report = () => onProgress({ ...state });
   return {
     start(phase) {
       state.phase = phase;
+      report();
+    },
+    chapter(chapter) {
+      if (chapter) state.chapter = chapter;
+      else delete state.chapter;
       report();
     },
     finish() {
@@ -250,44 +265,70 @@ export function mergeMessage(title, notesList) {
   return `Material title: ${title}\n\n${parts}`;
 }
 
-// Creates notes in a style with the resolved provider and model. For the local model, parts of
-// LOCAL_PART_CHARS are halved until each request fits the context (LOCAL_CONTEXT_TOKENS), merges
-// are grouped by size, and partial results are shortened when they do not fit together or when a
-// merged reply is cut off by LOCAL_MAX_OUTPUT_TOKENS; OpenAI uses 60,000-character parts and
-// groups of 10.
-// chat is replaceable so tests do not call a model. onProgress receives { phase, done, total }
-// whenever a call starts or ends or the plan changes.
-export async function generateNotes(
-  { title, content },
-  { style = DEFAULT_STYLE, provider, model, chat = llmChat, onProgress } = {}
-) {
-  const noteStyle = getStyle(style);
-  if (!noteStyle) throw new Error(`Unknown note style "${style}".`);
+export function overviewMessage(title, summaries) {
+  const chapters = summaries
+    .map((summary, i) => `<chapter number="${i + 1}">\n${summary}\n</chapter>`)
+    .join('\n\n');
+  return `Material title: ${title}\n\n${chapters}`;
+}
 
-  const local = provider === 'local';
-  const config = llmConfig();
-  const merge = mergePrompt(noteStyle);
-  const maxOutputTokens = local ? config.localMaxOutputTokens : config.openaiMaxOutputTokens;
-
-  let parts = splitText(content, local ? config.localPartChars : MAX_PART_CHARS);
-  if (local) {
-    const fits = (part, number, count) =>
-      fitsLocalContext(noteStyle.prompt, notesMessage(title, part, number, count));
-    // Not even the prompt alone fits, so no split can help
-    if (!fits('', 1, 2)) throw new Error(LOCAL_CONTEXT_ERROR);
-    parts = fitParts(parts, fits);
-  }
-
-  // Every model call is one step of the progress; purpose only goes into the log of local calls
-  const progress = createProgress(onProgress);
-  async function complete(phase, system, user, purpose) {
+// A model call as one step of the progress; purpose only goes into the log of local calls
+function caller({ provider, model, chat, maxOutputTokens }, progress) {
+  return async function complete(phase, system, user, purpose) {
     progress.start(phase);
     try {
       return (await chat({ provider, model, system, user, maxOutputTokens, purpose })).text;
     } finally {
       progress.finish();
     }
+  };
+}
+
+// Shortens one partial result with the given instructions for the local model; a result too
+// large for one call (or whose shortened reply is cut off) is split, and its halves are shortened
+function compressor(title, instructions, complete, progress) {
+  const compressSystem = `${instructions}\n\n${COMPRESS_INSTRUCTION}`;
+  return async function compress(notes) {
+    const user = compressMessage(title, notes);
+    // The one planned call for this note is replaced by one call per half, or added to them
+    // when it was made and cut off
+    let unplanned = -1;
+    if (fitsLocalContext(compressSystem, user)) {
+      try {
+        return await complete('compress', compressSystem, user, `compress of 1 note (${notes.length} chars)`);
+      } catch (err) {
+        if (!(err instanceof OutputLimitError)) throw err;
+        unplanned = 0;
+      }
+    }
+    const halves = splitInHalf(notes);
+    if (halves.length < 2) throw new Error(LOCAL_CONTEXT_ERROR);
+    progress.add(halves.length + unplanned);
+    const shorter = [];
+    for (const half of halves) shorter.push(await compress(half));
+    return shorter.join('\n\n');
+  };
+}
+
+// Notes for one text with one system prompt: the text is split into parts, each part is
+// summarized and the partial results are merged with the merge instruction for that prompt.
+// For the local model, parts of LOCAL_PART_CHARS are halved until each request fits the context
+// (LOCAL_CONTEXT_TOKENS), merges are grouped by size, and partial results are shortened when
+// they do not fit together or when a merged reply is cut off by LOCAL_MAX_OUTPUT_TOKENS; OpenAI
+// uses 60,000-character parts and groups of 10.
+async function summarizeText(title, content, system, llm, progress) {
+  const { local, config } = llm;
+  const merge = mergePrompt({ prompt: system });
+
+  let parts = splitText(content, local ? config.localPartChars : MAX_PART_CHARS);
+  if (local) {
+    const fits = (part, number, count) => fitsLocalContext(system, notesMessage(title, part, number, count));
+    // Not even the prompt alone fits, so no split can help
+    if (!fits('', 1, 2)) throw new Error(LOCAL_CONTEXT_ERROR);
+    parts = fitParts(parts, fits);
   }
+
+  const complete = caller(llm, progress);
 
   const mergeFits = (group) => fitsLocalContext(merge, mergeMessage(title, group));
   // Planned merges: exact for OpenAI; for the local model estimated from the partial results so
@@ -309,7 +350,7 @@ export async function generateNotes(
       partNotes.push(
         await complete(
           'parts',
-          noteStyle.prompt,
+          system,
           notesMessage(title, parts[i], i + 1, parts.length),
           `part ${i + 1} of ${parts.length}`
         )
@@ -343,35 +384,113 @@ export async function generateNotes(
     return reduceNotes(partNotes, mergeGroup);
   }
 
-  // Shortens one partial result with the style instructions; a result too large for one call
-  // (or whose shortened reply is cut off) is split, and its halves are shortened
-  const compressSystem = `${noteStyle.prompt}\n\n${COMPRESS_INSTRUCTION}`;
-  async function compress(notes) {
-    const user = compressMessage(title, notes);
-    // The one planned call for this note is replaced by one call per half, or added to them
-    // when it was made and cut off
-    let unplanned = -1;
-    if (fitsLocalContext(compressSystem, user)) {
-      try {
-        return await complete('compress', compressSystem, user, `compress of 1 note (${notes.length} chars)`);
-      } catch (err) {
-        if (!(err instanceof OutputLimitError)) throw err;
-        unplanned = 0;
-      }
-    }
-    const halves = splitInHalf(notes);
-    if (halves.length < 2) throw new Error(LOCAL_CONTEXT_ERROR);
-    progress.add(halves.length + unplanned);
-    const shorter = [];
-    for (const half of halves) shorter.push(await compress(half));
-    return shorter.join('\n\n');
-  }
-
   return reduceNotesToFit(partNotes, {
     merge: (group) =>
       complete('merge', merge, mergeMessage(title, group), `merge of ${group.length} notes`),
-    compress,
+    compress: compressor(title, system, complete, progress),
     fits: mergeFits,
     progress,
   });
+}
+
+// by-chapter notes: the chapters are detected (or a detection stored before is used), every
+// chapter is summarized with the chapter prompt (a chapter longer than one part is split and
+// merged inside the chapter), then the overview is written from all chapter summaries. When no
+// method finds chapters, the parts of the normal split are summarized instead. The result is the
+// overview (Overview, Chapters at a glance), then the chapter summaries in order.
+async function generateByChapter({ id, title, content, outline }, llm, progress, options) {
+  const { local, config } = llm;
+  const { detection: stored, onChapters, chunks } = options;
+  const partChars = local ? config.localPartChars : MAX_PART_CHARS;
+
+  let detection = stored;
+  if (!detection) {
+    // OpenAI requests are kept to the size of one part, local ones to the context
+    const fits = (system, user) => (local ? fitsLocalContext(system, user) : user.length <= MAX_PART_CHARS);
+    detection = await detectChapters(
+      { title, content, outline },
+      { complete: caller(llm, progress), fits, chunks: () => chunks(id) }
+    );
+    onChapters(detection);
+  }
+
+  const byParts = detection.chapters.length === 0;
+  const sections = byParts
+    ? splitText(content, partChars).map((text, i, all) => ({
+        title: all.length > 1 ? `Part ${i + 1}` : title,
+        text,
+      }))
+    : chapterTexts(content, detection.chapters);
+
+  // Calls expected for a section before it starts: its parts and their merges
+  const expectedCalls = (section) => {
+    const parts = splitText(section.text, partChars).length;
+    return parts + countMerges(parts);
+  };
+  const summaries = [];
+  for (const [i, section] of sections.entries()) {
+    progress.chapter({ kind: byParts ? 'part' : 'chapter', number: i + 1, count: sections.length });
+    // The plan of this section is extended with the calls of the sections after it and the
+    // overview
+    const later = sections.slice(i + 1).reduce((sum, next) => sum + expectedCalls(next), 0) + 1;
+    const sectionProgress = { ...progress, plan: (remaining) => progress.plan(remaining + later) };
+    summaries.push(await summarizeText(title, section.text, chapterPrompt(section.title), llm, sectionProgress));
+  }
+  progress.chapter(null);
+
+  // For the local model, chapter summaries that do not fit in one request together are
+  // shortened (only for the overview; the notes keep them in full), until shortening stops
+  // helping
+  const complete = caller(llm, progress);
+  let inputs = summaries;
+  progress.plan(1);
+  while (local && !fitsLocalContext(OVERVIEW_PROMPT, overviewMessage(title, inputs))) {
+    progress.add(inputs.length);
+    const shorter = [];
+    for (const [i, summary] of inputs.entries()) {
+      const compress = compressor(title, chapterPrompt(sections[i].title), complete, progress);
+      shorter.push(await compress(summary));
+    }
+    if (totalLength(shorter) > totalLength(inputs) * (1 - MIN_SHORTENING)) {
+      throw new Error(LOCAL_CONTEXT_ERROR);
+    }
+    inputs = shorter;
+  }
+  const overview = await complete('overview', OVERVIEW_PROMPT, overviewMessage(title, inputs), 'overview');
+  return [overview, ...summaries].map((notes) => notes.trim()).join('\n\n');
+}
+
+// Creates notes in a style with the resolved provider and model (see summarizeText and
+// generateByChapter).
+// chat is replaceable so tests do not call a model. onProgress receives { phase, done, total }
+// (and chapter for by-chapter notes) whenever a call starts or ends or the plan changes.
+// by-chapter only: the material also has id and outline; detection is a detection stored before
+// ({ method, chapters }), onChapters receives a new detection, and chunks(materialId) returns
+// the chunks with their vectors (replaceable for tests).
+export async function generateNotes(
+  { id, title, content, outline = null },
+  {
+    style = DEFAULT_STYLE,
+    provider,
+    model,
+    chat = llmChat,
+    onProgress,
+    detection = null,
+    onChapters = () => {},
+    chunks = loadChunks,
+  } = {}
+) {
+  const noteStyle = getStyle(style);
+  if (!noteStyle) throw new Error(`Unknown note style "${style}".`);
+
+  const local = provider === 'local';
+  const config = llmConfig();
+  const maxOutputTokens = local ? config.localMaxOutputTokens : config.openaiMaxOutputTokens;
+  const llm = { provider, model, chat, maxOutputTokens, local, config };
+  const progress = createProgress(onProgress);
+
+  if (noteStyle.id === CHAPTER_STYLE) {
+    return generateByChapter({ id, title, content, outline }, llm, progress, { detection, onChapters, chunks });
+  }
+  return summarizeText(title, content, noteStyle.prompt, llm, progress);
 }

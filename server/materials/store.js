@@ -33,10 +33,15 @@ export function getMaterial(id) {
     .get(id);
 }
 
-export function createMaterial({ courseId, title, type, content }) {
+// PDF only: pageOffsets (where each page starts in content) and outline ([{ title, start }])
+export function createMaterial({ courseId, title, type, content, pageOffsets = null, outline = null }) {
+  const json = (value) => (value ? JSON.stringify(value) : null);
   const result = getDb()
-    .prepare('INSERT INTO materials (course_id, title, type, content) VALUES (?, ?, ?, ?)')
-    .run(courseId, title, type, content);
+    .prepare(
+      `INSERT INTO materials (course_id, title, type, content, page_offsets, outline)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .run(courseId, title, type, content, json(pageOffsets), json(outline?.length ? outline : null));
   return Number(result.lastInsertRowid);
 }
 

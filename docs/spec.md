@@ -792,6 +792,62 @@ unikatno material_id + style). Slogi in sistemska navodila (dobesedno):
 
 study-notes (Study notes, privzeto): obstoječe navodilo iz razdelka "Zapiski".
 
+### Nadgradnja 6 – Povzetek po poglavjih (slog by-chapter)
+Nov slog »By chapter«: pregled celote in povzetek vsakega poglavja ali dela vsebine.
+Poglavje, daljše od enega dela, se razdeli in združi znotraj poglavja.
+
+Prepoznavanje poglavij je splošno in ni odvisno od zapisa naslovov. Vrstni red:
+1. PDF: kazalo (outline/bookmarks), prebrano ob uvozu, z mesti poglavij v besedilu.
+2. Model izbere poglavja med kandidati (kratke samostojne vrstice s številom besed do
+   naslednjega kandidata), z navodilom:
+```text
+You receive candidate heading lines from a long document, in document order. Each
+line has an id and the number of words that follow it until the next candidate.
+Identify the lines that start the main chapters of the document: top-level chapters
+only, not subsections, not table of contents entries, not running page headers or
+footers. Respond only with JSON in document order:
+{"chapters":[{"id": <id>, "title": "<clean chapter title>"}]}
+If the document has no chapters, respond {"chapters":[]}.
+```
+3. Brez naslovov: delitev po temah iz vektorjev zaporednih kosov (mesta največjega
+   padca podobnosti), z naslovom vsakega dela po navodilu:
+```text
+Give a short title (at most 8 words) for this section of learning material. Use only
+information from the section. Respond with the title only.
+```
+Rezultat se preveri: od 2 do 60 poglavij v pravilnem vrstnem redu, vsako vsaj okoli 300
+besed (krajša se združijo s sosednjim). Če preverjanje ne uspe, se uporabi naslednji način.
+
+Navodilo za posamezno poglavje:
+```text
+You are an assistant that summarizes one chapter of a book or long learning material.
+Use only information from the chapter; do not add or invent anything. Respond only in
+Markdown with exactly this structure:
+
+## {chapter title}
+A paragraph of 3 to 6 sentences describing what the chapter covers and its main
+conclusions.
+
+**Key points**
+3 to 8 bullet points with the most important ideas of the chapter.
+```
+
+Navodilo za pregled celote:
+```text
+Below are summaries of all chapters of the same material, in order. Write an overview
+of the whole material. Use only information from the summaries; do not add anything.
+Respond only in Markdown with exactly this structure:
+
+## Overview
+A paragraph of 4 to 8 sentences describing what the whole material covers and how the
+chapters build on each other.
+
+## Chapters at a glance
+A numbered list with one sentence per chapter: **chapter title** – what it covers.
+```
+
+Končni rezultat: Overview, Chapters at a glance, nato povzetki poglavij po vrstnem redu.
+
 brief (Brief):
 ```text
 You are an assistant that summarizes learning material. Use only information from the

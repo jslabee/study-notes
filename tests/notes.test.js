@@ -566,10 +566,10 @@ test('prompts match the specification verbatim', () => {
   assert.equal(getStyle('study-notes').prompt, NOTES_SYSTEM_PROMPT);
 });
 
-test('the six styles are defined with names and descriptions', () => {
+test('the seven styles are defined with names and descriptions', () => {
   assert.deepEqual(
     NOTE_STYLES.map((s) => s.id),
-    ['study-notes', 'brief', 'outline', 'cheat-sheet', 'lecture-guide', 'simple']
+    ['study-notes', 'brief', 'outline', 'cheat-sheet', 'lecture-guide', 'simple', 'by-chapter']
   );
   for (const style of NOTE_STYLES) {
     assert.ok(style.name && style.description && style.prompt);
@@ -578,7 +578,8 @@ test('the six styles are defined with names and descriptions', () => {
 });
 
 test('each style uses its own prompt for a short material', async () => {
-  for (const style of NOTE_STYLES) {
+  // by-chapter also detects chapters and writes an overview; see tests/chapters.test.js
+  for (const style of NOTE_STYLES.filter((s) => s.id !== 'by-chapter')) {
     const { calls, chat } = mockChat();
     await generateNotes({ title: 'Cells', content: 'Cells are small.' }, { style: style.id, chat });
     assert.equal(calls.length, 1);

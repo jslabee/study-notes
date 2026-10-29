@@ -1027,3 +1027,86 @@ app's behavior. Use plain CSS with CSS variables; do not add a UI library.
 **Git:** branch fix/local-merge, changed files: 16
 
 **My changes and outcome:** 
+
+### 29/10/2026, 19:24:27
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> Add a new note style "by-chapter" (name "By chapter") as specified in docs/spec.md,
+> section "Nadgradnja 7". Copy all prompts verbatim. Chapter detection must be
+> generic and must not depend on how headings are written. You may add tests in
+> tests/ (keep the existing verbatim tests passing).
+> 
+> 1. PDF outline (method 1): during PDF import, read the document outline
+>    (bookmarks) with unpdf/pdf.js, map each top-level entry to the character offset
+>    of its page start in the cleaned text (using page_offsets), and store the
+>    chapters (title, start offset) with the material. Existing PDFs without this
+>    data simply skip method 1.
+> 2. Model-based detection (method 2): collect candidate lines (a line on its own,
+>    shorter than 120 characters, not mostly digits) with an id, the line text
+>    and the number of words until the next candidate. If there are many candidates,
+>    keep the ones followed by the most words (fit the request into the context limit
+>    of the chosen provider). Send them with the "candidate heading lines" prompt and
+>    parse the JSON; ignore unknown ids.
+> 3. Topic segmentation (method 3): for materials with no detected chapters, compute
+>    cosine similarity between consecutive chunk vectors (chunk_vectors), choose
+>    split points at the largest drops so that sections have at least about 300
+>    words, with roughly one section per 8-15 chunks (2..30 sections). Title each
+>    section with the "short title" prompt.
+> 4. Validation: 2..60 chapters, in increasing offset order, each at least about
+>    300 words (merge shorter ones into the neighbor). If a method fails validation,
+>    try the next one. Record which method was used.
+> 5. Generation (by-chapter style): for each chapter, the chapter prompt with
+>    {chapter title}; chapters longer than one part are split inside the chapter
+>    and merged with the existing merge instruction using the chapter prompt as the
+>    style instructions. Then the overview prompt over all chapter summaries
+>    (compress them first if they do not fit, as in the existing merge logic).
+>    Final notes: Overview, Chapters at a glance, then chapter summaries in order.
+> 6. UI (Notes panel): "Detected N chapters (PDF outline | model | topic
+>    segmentation)" with an expandable list of titles, progress per chapter
+>    ("Chapter 3 of 7"), and a "Detect again" button that reruns detection. Add
+>    by-chapter to the style selector with the description "Overview and a summary
+>    of each chapter or section (books, long scripts, lectures)".
+> 7. Tests (model and vectors mocked): outline mapping to offsets; model-based
+>    selection with a table of contents and running headers among candidates;
+>    invalid JSON from the model falls back to the next method; topic segmentation
+>    produces ordered sections of minimum size; validation and merging of short
+>    chapters; generation output structure. Run npm test and npm run build.
+> Do not change other styles or modules.
+> </pasted_content id="7e18">
+
+**Summary:** Nothing was changed. The by-chapter prompt can't be done on feature/chapter-notes because docs/spec.md has no by-chapter section with the four required prompts, and the uncommitted passage work, including page_offsets needed for the PDF outline method, is no longer in the tree.
+
+**Type:** question
+
+**Git:** branch feature/chapter-notes, changed files: 1
+
+**My changes and outcome:** 
+
+### 29/10/2026, 19:26:35
+
+**Prompt:**
+
+> <pasted_content id="7e18">
+> The by-chapter section in docs/spec.md is "Nadgradnja 6 – Povzetek po poglavjih
+> (slog by-chapter)"; it contains the prompts. Use it.
+> 
+> page_offsets does not exist yet. Add it as part of this task: in a migration add a
+> page_offsets column to materials (JSON array, NULL for non-PDF), and during PDF
+> import record the character offset where each page starts in the final cleaned
+> text, keeping the existing cleanup rules. Use it for mapping PDF outline entries to
+> chapter offsets (method 1). Do not add the passage view or page numbers in
+> citations; that is a separate later task.
+> 
+> Then implement all seven points of the previous instruction, reading "Nadgradnja 6"
+> wherever it says "Nadgradnja 7".
+> </pasted_content id="7e18">
+
+**Summary:** Added the by-chapter note style: PDF page offsets and outline at import, chapter detection (PDF outline, then model, then topic segmentation, with validation), per-chapter generation with an overview, and stored detection with "Detect again" in the Notes panel (server/notes/chapters.js, server/notes/generate.js, server/notes/styles.js, server/materials/convert.js, server/materials/store.js, server/db.js, server/jobs.js, server/index.js, client/src/components/NotesPanel.jsx, client/src/api.js, client/src/styles/notes.css, tests/chapters.test.js, tests/fixtures/make-pdf.js, tests/notes.test.js, tests/db-migration.test.js).
+
+**Type:** implementation
+
+**Git:** branch feature/chapter-notes, changed files: 17
+
+**My changes and outcome:** 

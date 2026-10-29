@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { deleteNotes, generateNotes, getNoteStyles, getNotes } from '../api.js'
+import { formatCount } from '../format.js'
 import { useLlm } from '../llm.js'
 import { useToast } from '../toast.js'
 import ConfirmDialog from './ConfirmDialog.jsx'
@@ -61,9 +62,18 @@ function NotesSkeleton() {
 
 const PHASE_LABELS = {
   queued: 'Waiting for another job',
+  detect: 'Detecting chapters',
   parts: 'Summarizing parts',
   compress: 'Shortening',
   merge: 'Merging',
+  overview: 'Writing the overview',
+}
+
+// The step label: for by-chapter notes the chapter (or part) being summarized, else the phase
+function progressLabel(progress) {
+  const chapter = progress?.chapter
+  if (chapter) return `${chapter.kind === 'part' ? 'Part' : 'Chapter'} ${chapter.number} of ${chapter.count}`
+  return (progress && PHASE_LABELS[progress.phase]) ?? 'Generating notes'
 }
 
 function formatElapsed(seconds) {
@@ -87,7 +97,7 @@ function Elapsed({ seconds }) {
 function NotesProgress({ progress }) {
   const planned = progress?.total > 0
   const steps = planned ? `${progress.done} of ${progress.total} steps` : null
-  const label = progress ? PHASE_LABELS[progress.phase] ?? 'Generating notes' : 'Generating notes'
+  const label = progressLabel(progress)
   return (
     <div className="notes-progress" role="status">
       <span
@@ -116,6 +126,29 @@ function NotesProgress({ progress }) {
         the meantime.
       </p>
     </div>
+  )
+}
+
+const DETECTION_METHODS = { outline: 'PDF outline', model: 'model', topics: 'topic segmentation' }
+
+// The chapters found for by-chapter notes ({ method, titles }) as an expandable list; method
+// null means none were found and the notes were summarized by parts
+function DetectedChapters({ chapters }) {
+  if (!chapters.method) {
+    return <p className="notes-chapters small muted">No chapters detected – summarized by parts</p>
+  }
+  return (
+    <details className="notes-chapters small">
+      <summary>
+        Detected {formatCount(chapters.titles.length, 'chapter')} (
+        {DETECTION_METHODS[chapters.method] ?? chapters.method})
+      </summary>
+      <ol>
+        {chapters.titles.map((title, i) => (
+          <li key={i}>{title}</li>
+        ))}
+      </ol>
+    </details>
   )
 }
 
@@ -222,11 +255,11 @@ function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, 
     if (generated.some((n) => n.style === id)) setActiveStyle(id)
   }
 
-  async function handleGenerate(style = generateStyle) {
+  async function handleGenerate(style = generateStyle, { redetect = false } = {}) {
     setError('')
     setStarting(true)
     try {
-      await generateNotes(materialId, { style, ...choice })
+      await generateNotes(materialId, { style, redetect, ...choice })
       setActiveStyle(style)
       await load()
     } catch (err) {
@@ -326,6 +359,18 @@ function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, 
           <div className="notes-tab-toolbar">
             {shown.status === 'ready' && <ModelBadge value={shown.model} />}
             <span className="notes-tab-actions">
+              {shown.chapters && (
+                <button
+                  type="button"
+                  className="btn btn-small btn-ghost"
+                  onClick={() => handleGenerate(shown.style, { redetect: true })}
+                  disabled={starting || shown.status === 'processing'}
+                  title="Detect the chapters again and regenerate these notes"
+                >
+                  <Icon name="refresh" size={14} />
+                  Detect again
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-small btn-ghost"
@@ -345,6 +390,7 @@ function NotesPanel({ material, onOpenSource, expanded = false, onToggleExpand, 
               </button>
             </span>
           </div>
+          {shown.chapters && <DetectedChapters chapters={shown.chapters} />}
           {content}
         </div>
       </>

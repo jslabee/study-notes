@@ -8,7 +8,7 @@ import { enqueue, getNotesProgress, restoreJobs } from './jobs.js';
 import { EMBEDDING_UNREACHABLE_ERROR, PROVIDERS, getLlmModels, resolveLlm } from './llm.js';
 import { answerQuestion } from './rag/answer.js';
 import { DEFAULT_STYLE, NOTE_STYLES, getStyle } from './notes/styles.js';
-import { convertToText, pdfToText } from './materials/convert.js';
+import { convertToText, pdfToTextWithPages } from './materials/convert.js';
 import {
   createMaterial,
   deleteMaterial,
@@ -104,13 +104,19 @@ function requireMaterial(materialId) {
   return material;
 }
 
-const NOTES_FIELDS = 'style, status, content, model, error, created_at AS createdAt';
+const NOTES_FIELDS = 'style, status, content, model, error, created_at AS createdAt, chapters';
 const STYLE_ORDER = new Map(NOTE_STYLES.map((style, i) => [style.id, i]));
 
 // Notes for the API: while they are being generated they include the job's progress
-// { phase, done, total, elapsedSeconds } (null when no job is known for them)
-function withProgress({ id, ...notes }) {
-  return notes.status === 'processing' ? { ...notes, progress: getNotesProgress(id) } : notes;
+// { phase, done, total, elapsedSeconds } (null when no job is known for them). by-chapter notes
+// include the detected chapters once they are known: { method, titles }, method outline, model,
+// topics or null (no chapters found; summarized by parts).
+function withProgress({ id, chapters, ...notes }) {
+  const detection = chapters && JSON.parse(chapters);
+  const result = detection
+    ? { ...notes, chapters: { method: detection.method, titles: detection.chapters.map((c) => c.title) } }
+    : notes;
+  return notes.status === 'processing' ? { ...result, progress: getNotesProgress(id) } : result;
 }
 
 export const app = express();
@@ -177,11 +183,11 @@ app.post('/api/materials', upload.single('file'), async (req, res) => {
   }
 
   let content;
+  let pageOffsets = null;
+  let outline = null;
   try {
-    content =
-      type === 'pdf'
-        ? await pdfToText(file.buffer)
-        : convertToText(file ? file.buffer.toString('utf8') : String(text), type);
+    if (type === 'pdf') ({ text: content, pageOffsets, outline } = await pdfToTextWithPages(file.buffer));
+    else content = convertToText(file ? file.buffer.toString('utf8') : String(text), type);
   } catch (err) {
     throw httpError(400, err.message);
   }
@@ -189,7 +195,7 @@ app.post('/api/materials', upload.single('file'), async (req, res) => {
     throw httpError(413, PDF_TEXT_TOO_LARGE_ERROR);
   }
 
-  const id = createMaterial({ courseId, title, type, content });
+  const id = createMaterial({ courseId, title, type, content, pageOffsets, outline });
   enqueue('index', id);
   res.status(202).json({ id, status: 'processing' });
 });
@@ -225,6 +231,8 @@ app.post('/api/materials/:id/notes', async (req, res) => {
   const materialId = parseId(req.params.id, 'material id');
   const style = parseStyle(req.body?.style, { optional: true });
   const choice = parseLlmChoice(req.body);
+  // by-chapter: detect the chapters again instead of using the ones found before
+  const redetect = req.body?.redetect === true;
   const material = requireMaterial(materialId);
   const db = getDb();
 
@@ -240,10 +248,11 @@ app.post('/api/materials/:id/notes', async (req, res) => {
         `INSERT INTO notes (material_id, style) VALUES (?, ?)
          ON CONFLICT (material_id, style) DO UPDATE SET
            content = NULL, model = NULL, status = 'processing', error = NULL,
+           chapters = CASE WHEN ? THEN NULL ELSE chapters END,
            created_at = CURRENT_TIMESTAMP
          RETURNING id`
       )
-      .get(materialId, style);
+      .get(materialId, style, redetect ? 1 : 0);
     enqueue('notes', id, llm);
   }
   res.status(202).json({ style, status: 'processing' });
